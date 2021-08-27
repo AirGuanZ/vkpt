@@ -1,0 +1,103 @@
+#include <vkpt/vulkan/command_buffer.h>
+
+VKPT_BEGIN
+
+CommandBuffer::CommandBuffer()
+    : impl_(nullptr)
+{
+    
+}
+
+CommandBuffer::CommandBuffer(vk::CommandBuffer impl)
+    : impl_(impl)
+{
+    
+}
+
+const vk::CommandBuffer CommandBuffer::getRaw() const
+{
+    return impl_;
+}
+
+void CommandBuffer::begin(bool one_time_submit)
+{
+    vk::CommandBufferUsageFlags flags = {};
+    if(one_time_submit)
+        flags |= vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+
+    impl_.begin(vk::CommandBufferBeginInfo{
+        .flags = flags
+    });
+}
+
+void CommandBuffer::end()
+{
+    impl_.end();
+}
+
+void CommandBuffer::beginPipeline(
+    const Pipeline                      &pipeline,
+    vk::Framebuffer                      framebuffer,
+    vk::ArrayProxy<const vk::ClearValue> clear_values)
+{
+    impl_.beginRenderPass(vk::RenderPassBeginInfo{
+        .renderPass      = pipeline.getRenderPass(),
+        .framebuffer     = framebuffer,
+        .renderArea      = pipeline.getDefaultRect(),
+        .clearValueCount = clear_values.size(),
+        .pClearValues    = clear_values.data()
+    }, vk::SubpassContents::eInline);
+
+    impl_.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.getPipeline());
+}
+
+void CommandBuffer::endPipeline()
+{
+    impl_.endRenderPass();
+}
+
+void CommandBuffer::bindVertexBuffers(
+    vk::ArrayProxy<const vk::Buffer> vertex_buffers,
+    vk::ArrayProxy<size_t>           vertex_offsets)
+{
+    assert(vertex_buffers.size() == vertex_offsets.size() ||
+           vertex_offsets.empty());
+
+    if(vertex_offsets.empty())
+    {
+        assert(vertex_buffers.size() < 32);
+        std::array<size_t, 32> offsets = {};
+        impl_.bindVertexBuffers(
+            0, vertex_buffers.size(),
+            vertex_buffers.data(), offsets.data());
+    }
+    else
+    {
+        impl_.bindVertexBuffers(
+            0, vertex_buffers.size(),
+            vertex_buffers.data(), vertex_offsets.data());
+    }
+}
+
+void CommandBuffer::draw(
+    uint32_t vertex_count,
+    uint32_t instance_count,
+    uint32_t first_vertex,
+    uint32_t first_instance)
+{
+    impl_.draw(vertex_count, instance_count, first_vertex, first_instance);
+}
+
+void CommandBuffer::pipelineBarriers(
+    vk::PipelineStageFlags                        src_stage,
+    vk::PipelineStageFlags                        dst_stage,
+    vk::ArrayProxy<const vk::MemoryBarrier>       memory_barriers,
+    vk::ArrayProxy<const vk::BufferMemoryBarrier> buffer_barriers,
+    vk::ArrayProxy<const vk::ImageMemoryBarrier>  image_barriers)
+{
+    impl_.pipelineBarrier(
+        src_stage, dst_stage, {},
+        memory_barriers, buffer_barriers, image_barriers);
+}
+
+VKPT_END

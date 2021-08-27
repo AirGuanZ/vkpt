@@ -1,0 +1,9 @@
+[submodule "3rdparty/agz-utils"]
+	path = 3rdparty/agz-utils
+	url = https://github.com/AirGuanZ/agz-utils.git
+[submodule "3rdparty/shaderc"]
+	path = 3rdparty/shaderc
+	url = https://github.com/google/shaderc.git
+[submodule "3rdparty/vk-bootstrap"]
+	path = 3rdparty/vk-bootstrap
+	url = https://github.com/charles-lunarg/vk-bootstrap
