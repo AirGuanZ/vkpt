@@ -3,48 +3,66 @@
 #include <agz-utils/alloc.h>
 
 #include <vkpt/vulkan/graph/graph.h>
+#include <vkpt/vulkan/command_buffer_allocator.h>
 #include <vkpt/vulkan/queue.h>
 
 VKPT_BEGIN
 
-struct ExecutablePass
+namespace graph
 {
-    struct ExecutionBarrier
+
+    struct ExecutablePass
     {
-        vk::PipelineStageFlags src;
-        vk::PipelineStageFlags dst;
+        struct ExecutionBarrier
+        {
+            vk::PipelineStageFlags src;
+            vk::PipelineStageFlags dst;
+
+            std::vector<vk::BufferMemoryBarrier> buffers;
+            std::vector<vk::ImageMemoryBarrier>  images;
+        };
+
+        std::optional<ExecutionBarrier> pre_barrier;
+        std::optional<ExecutionBarrier> post_barrier;
+
+        Pass::Callback *callback = nullptr;
     };
 
-    std::vector<ExecutionBarrier>        execution_barriers;
-    std::vector<vk::BufferMemoryBarrier> buffer_barriers;
-    std::vector<vk::ImageMemoryBarrier>  image_barriers;
+    struct ExecutableSection
+    {
+        std::vector<vk::Semaphore>          wait_semaphores;
+        std::vector<vk::PipelineStageFlags> wait_stages;
+        std::vector<vk::Semaphore>          signal_semaphores;
 
-    uint32_t section_index = 0;
+        vk::Fence signal_fence;
+        
+        std::vector<ExecutablePass> passes;
 
-    RenderGraph::PassCallback *callback = nullptr;
-};
+        Queue queue;
+    };
 
-struct ExecutableSection
-{
-    std::vector<vk::Semaphore>          wait_external_semaphores;
-    std::vector<vk::PipelineStageFlags> wait_external_stages;
-    std::vector<vk::Semaphore>          signal_external_semaphores;
+    struct ExecutableRenderGraph
+    {
+        std::vector<ExecutableSection> sections;
+    };
 
-    std::vector<uint32_t>               wait_internal_semaphores;
-    std::vector<vk::PipelineStageFlags> wait_internal_stages;
-    std::vector<uint32_t>               signal_internal_semaphores;
+    class RenderGraphExecutor
+    {
+    public:
+        
+        void execute(
+            RenderGraph::ThreadPool &threads,
+            uint32_t                 thread_count,
+            CommandBufferAllocator  &command_buffer_allocator,
+            ExecutableRenderGraph   &graph);
 
-    uint32_t command_buffer_count = 1;
+    private:
 
-    Queue queue;
-};
+        static void executeSection(
+            ExecutableSection &section,
+            CommandBuffer     &command_buffer);
+    };
 
-struct ExecutableRenderGraph
-{
-    uint32_t thread_count = 1;
-
-    std::vector<ExecutablePass>    passes;
-    std::vector<ExecutableSection> sections;
-};
+} // namespace graph
 
 VKPT_END
