@@ -88,7 +88,7 @@ void CommandBuffer::draw(
     impl_.draw(vertex_count, instance_count, first_vertex, first_instance);
 }
 
-void CommandBuffer::pipelineBarriers(
+void CommandBuffer::pipelineBarrier(
     vk::PipelineStageFlags                        src_stage,
     vk::PipelineStageFlags                        dst_stage,
     vk::ArrayProxy<const vk::MemoryBarrier>       memory_barriers,
@@ -98,6 +98,21 @@ void CommandBuffer::pipelineBarriers(
     impl_.pipelineBarrier(
         src_stage, dst_stage, {},
         memory_barriers, buffer_barriers, image_barriers);
+}
+
+void CommandBuffer::pipelineBarrier(
+    vk::ArrayProxy<const vk::MemoryBarrier2KHR>       memory_barriers,
+    vk::ArrayProxy<const vk::BufferMemoryBarrier2KHR> buffer_barriers,
+    vk::ArrayProxy<const vk::ImageMemoryBarrier2KHR>  image_barriers)
+{
+    impl_.pipelineBarrier2KHR(vk::DependencyInfoKHR{
+        .memoryBarrierCount       = memory_barriers.size(),
+        .pMemoryBarriers          = memory_barriers.data(),
+        .bufferMemoryBarrierCount = buffer_barriers.size(),
+        .pBufferMemoryBarriers    = buffer_barriers.data(),
+        .imageMemoryBarrierCount  = image_barriers.size(),
+        .pImageMemoryBarriers     = image_barriers.data()
+    });
 }
 
 VKPT_END

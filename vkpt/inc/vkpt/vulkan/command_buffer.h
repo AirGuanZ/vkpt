@@ -35,12 +35,17 @@ public:
         uint32_t first_vertex   = 0,
         uint32_t first_instance = 0);
 
-    void pipelineBarriers(
+    void pipelineBarrier(
         vk::PipelineStageFlags                        src_stage,
         vk::PipelineStageFlags                        dst_stage,
         vk::ArrayProxy<const vk::MemoryBarrier>       memory_barriers,
         vk::ArrayProxy<const vk::BufferMemoryBarrier> buffer_barriers,
         vk::ArrayProxy<const vk::ImageMemoryBarrier>  image_barriers);
+
+    void pipelineBarrier(
+        vk::ArrayProxy<const vk::MemoryBarrier2KHR>       memory_barriers,
+        vk::ArrayProxy<const vk::BufferMemoryBarrier2KHR> buffer_barriers,
+        vk::ArrayProxy<const vk::ImageMemoryBarrier2KHR>  image_barriers);
 
 protected:
 

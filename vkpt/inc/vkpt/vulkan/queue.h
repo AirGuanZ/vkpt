@@ -8,11 +8,20 @@ class Queue
 {
 public:
 
+    enum class Type
+    {
+        Graphics,
+        Compute,
+        Transfer,
+        Present
+    };
+
     Queue();
 
     Queue(
         vk::Device device,
         vk::Queue  raw_queue,
+        Type       type,
         uint32_t   family_index);
 
     operator bool() const;
@@ -21,6 +30,8 @@ public:
 
     vk::Queue getRaw();
 
+    Type getType() const;
+
     uint32_t getFamilyIndex() const;
 
     void submit(
@@ -28,17 +39,18 @@ public:
         vk::ArrayProxy<const vk::PipelineStageFlags> wait_stages,
         vk::ArrayProxy<const vk::Semaphore>          signal_semaphores,
         vk::ArrayProxy<const CommandBuffer>          command_buffers,
-        vk::Fence fence);
+        vk::Fence fence) const;
 
 private:
 
     vk::Device device_;
     vk::Queue  queue_;
+    Type       type_;
     uint32_t   family_index_;
 };
 
 inline Queue::Queue()
-    : Queue(nullptr, nullptr, 0)
+    : Queue(nullptr, nullptr, Type::Graphics, 0)
 {
     
 }
@@ -46,8 +58,10 @@ inline Queue::Queue()
 inline Queue::Queue(
     vk::Device device,
     vk::Queue  raw_queue,
+    Type       type,
     uint32_t   family_index)
-    : device_(device), queue_(raw_queue), family_index_(family_index)
+    : device_(device), queue_(raw_queue),
+      type_(type), family_index_(family_index)
 {
     assert(!device == !raw_queue);
 }
@@ -67,6 +81,11 @@ inline vk::Queue Queue::getRaw()
     return queue_;
 }
 
+inline Queue::Type Queue::getType() const
+{
+    return type_;
+}
+
 inline uint32_t Queue::getFamilyIndex() const
 {
     return family_index_;
@@ -77,7 +96,7 @@ inline void Queue::submit(
     vk::ArrayProxy<const vk::PipelineStageFlags> wait_stages,
     vk::ArrayProxy<const vk::Semaphore>          signal_semaphores,
     vk::ArrayProxy<const CommandBuffer>          command_buffers,
-    vk::Fence                                    fence)
+    vk::Fence                                    fence) const
 {
     static thread_local std::vector<vk::CommandBuffer> raw_command_buffers;
 

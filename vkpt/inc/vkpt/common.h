@@ -1,5 +1,6 @@
 #pragma once
 
+#include <compare>
 #include <stdexcept>
 
 #include <agz-utils/math.h>

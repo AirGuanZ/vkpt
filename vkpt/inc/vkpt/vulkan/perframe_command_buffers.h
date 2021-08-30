@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vkpt/vulkan/command_buffer_allocator.h>
 #include <vkpt/vulkan/queue.h>
 
 VKPT_BEGIN
@@ -10,7 +11,7 @@ public:
 
     PerFrameCommandBuffers(
         vk::Device device,
-        int        frame_count,
+        uint32_t   frame_count,
         uint32_t   queue_family);
     
     void newFrame();
@@ -32,6 +33,34 @@ private:
     std::vector<PerFrame> frames_;
 
     uint32_t queue_family_;
+};
+
+class PerFramePerQueueCommandBuffers :
+    public agz::misc::uncopyable_t,
+    public CommandBufferAllocator
+{
+public:
+
+    PerFramePerQueueCommandBuffers(
+        vk::Device device,
+        uint32_t   frame_count,
+        uint32_t   graphics_queue,
+        uint32_t   compute_queue,
+        uint32_t   transfer_queue);
+
+    void newFrame();
+
+    CommandBuffer newGraphicsCommandBuffer() override;
+
+    CommandBuffer newComputeCommandBuffer() override;
+
+    CommandBuffer newTransferCommandBuffer() override;
+
+private:
+
+    PerFrameCommandBuffers graphics_;
+    PerFrameCommandBuffers compute_;
+    PerFrameCommandBuffers transfer_;
 };
 
 VKPT_END

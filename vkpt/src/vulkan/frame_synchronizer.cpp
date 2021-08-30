@@ -5,63 +5,36 @@ VKPT_BEGIN
 FrameSynchronizer::FrameSynchronizer(vk::Device device, int frame_count)
     : device_(device), frame_index_(0)
 {
-    vk::FenceCreateInfo fence_create_info = {
-        .flags = vk::FenceCreateFlagBits::eSignaled
-    };
-
-    fence_info_.reserve(frame_count);
-    for(int i = 0; i < frame_count; ++i)
-        fence_info_.push_back(
-            { false, device.createFenceUnique(fence_create_info) });
+    fence_info_.resize(frame_count);
 }
 
 FrameSynchronizer::~FrameSynchronizer()
 {
     for(auto &f : fence_info_)
-    {
-        if(f.will_be_signaled)
-        {
-            auto fence = f.fence.get();
-            (void)device_.waitForFences(
-                1, &fence, true, UINT64_MAX);
-        }
-
-        for(auto &func : f.delayed_functions)
-            func();
-        f.delayed_functions.clear();
-    }
+        wait(f);
 }
 
 void FrameSynchronizer::newFrame()
 {
     frame_index_ = (frame_index_ + 1) % static_cast<int>(fence_info_.size());
-
-    auto &fence_info = fence_info_[frame_index_];
-    fence_info.will_be_signaled = true;
-
-    vk::Fence fence = fence_info.fence.get();
-    vk::Result result = device_.waitForFences(1, &fence, true, UINT64_MAX);
-    if(result != vk::Result::eSuccess)
-    {
-        throw VKPTException(
-            "error in waiting for frame fence: " + to_string(result));
-    }
-
-    result = device_.resetFences(1, &fence);
-    if(result != vk::Result::eSuccess)
-    {
-        throw VKPTException(
-            "error in resetting the frame fence: " + to_string(result));
-    }
-
-    for(auto &func : fence_info.delayed_functions)
-        func();
-    fence_info.delayed_functions.clear();
+    wait(fence_info_[frame_index_]);
 }
 
-vk::Fence FrameSynchronizer::getFrameEndingFence()
+void FrameSynchronizer::endFrame(vk::ArrayProxy<const Queue> queues)
 {
-    return fence_info_[frame_index_].fence.get();
+    auto &info = fence_info_[frame_index_];
+
+    while(info.fences.size() < queues.size())
+        info.fences.push_back(device_.createFenceUnique({}));
+
+    assert(info.used_fences.empty());
+    for(uint32_t i = 0; i < queues.size(); ++i)
+    {
+        info.used_fences.push_back(info.fences[i].get());
+        queues.data()[i].submit({}, {}, {}, {}, info.used_fences.back());
+    }
+
+    fence_info_[frame_index_].will_be_signaled = true;
 }
 
 void FrameSynchronizer::executeAfterSync(std::function<void()> func)
@@ -77,6 +50,25 @@ void FrameSynchronizer::_triggerAllSync()
             func();
         f.delayed_functions.clear();
     }
+}
+
+void FrameSynchronizer::wait(FenceInfo &info)
+{
+    if(info.will_be_signaled)
+    {
+        (void)device_.waitForFences(info.used_fences, true, UINT64_MAX);
+        info.will_be_signaled = false;
+    }
+
+    if(!info.used_fences.empty())
+    {
+        device_.resetFences(info.used_fences);
+        info.used_fences.clear();
+    }
+
+    for(auto &func : info.delayed_functions)
+        func();
+    info.delayed_functions.clear();
 }
 
 VKPT_END

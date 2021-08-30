@@ -54,6 +54,7 @@ private:
 
     vk::UniqueCommandPool   command_pool_;
     vk::UniqueCommandBuffer command_buffer_;
+    bool                    is_dirty_ = false;
 
     std::vector<vk::BufferMemoryBarrier>          buffer_memory_barriers_;
     std::vector<std::unique_ptr<StagingResource>> staging_resources_;

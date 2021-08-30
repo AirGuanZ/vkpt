@@ -36,7 +36,9 @@ void ResourceUploader::uploadBuffer(
     const void *data,
     size_t      bytes)
 {
-    if(bytes < 128)
+    is_dirty_ = true;
+
+    if(bytes < 256)
     {
         command_buffer_->updateBuffer(dst_buffer, 0, bytes, data);
         return;
@@ -101,8 +103,9 @@ void ResourceUploader::uploadBuffer(
 
 void ResourceUploader::submitAndSync()
 {
-    if(staging_resources_.empty() && buffer_memory_barriers_.empty())
+    if(!is_dirty_)
         return;
+    is_dirty_ = false;
 
     command_buffer_->pipelineBarrier(
         vk::PipelineStageFlagBits::eTransfer,

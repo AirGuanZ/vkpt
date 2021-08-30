@@ -144,9 +144,11 @@ DescriptorSetLayout::DescriptorSetLayout(
 }
 
 DescriptorSetManager::DescriptorSetManager(vk::Device device)
-    : device_(device), next_layout_id_(0)
+    : device_(device)
 {
-    
+#ifdef VKPT_DEBUG
+    next_layout_id_ = 0;
+#endif
 }
 
 DescriptorSetLayout DescriptorSetManager::createLayout(
@@ -210,7 +212,9 @@ DescriptorSetLayout DescriptorSetManager::createLayout(
     new_record.ref_count               = 1;
     new_record.layout                  = std::move(vk_layout);
     new_record.info_to_layout_iterator = info_to_layout_iterator;
+#ifdef VKPT_DEBUG
     new_record.id                      = next_layout_id_++;
+#endif
 
     // fill pool_create_info
 
@@ -242,7 +246,9 @@ DescriptorSetLayout DescriptorSetManager::createLayout(
     // create set layout
 
     auto result = DescriptorSetLayout(new_record.layout.get(), new_index, this);
+#ifdef VKPT_DEBUG
     result.id_ = new_record.id;
+#endif
     return result;
 }
 
@@ -276,7 +282,9 @@ DescriptorSet DescriptorSetManager::createSet(const DescriptorSetLayout &layout)
     for(auto &s : new_sets)
     {
         auto set = DescriptorSet(s, layout.manager_index_, this);
+#ifdef VKPT_DEBUF
         set.id_ = record.id;
+#endif
         record.free_sets.push_back(std::move(set));
     }
 

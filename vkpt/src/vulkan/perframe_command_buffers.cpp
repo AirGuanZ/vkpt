@@ -4,7 +4,7 @@ VKPT_BEGIN
 
 PerFrameCommandBuffers::PerFrameCommandBuffers(
     vk::Device device,
-    int        frame_count,
+    uint32_t   frame_count,
     uint32_t   queue_family)
     : device_(device), frame_index_(0),
       queue_family_(queue_family)
@@ -46,6 +46,41 @@ vk::CommandBuffer PerFrameCommandBuffers::newCommandBuffer()
         f.buffers.push_back(std::move(buffer));
     }
     return f.buffers[f.next_available_buffer_index++].get();
+}
+
+PerFramePerQueueCommandBuffers::PerFramePerQueueCommandBuffers(
+    vk::Device device,
+    uint32_t   frame_count,
+    uint32_t   graphics_queue,
+    uint32_t   compute_queue,
+    uint32_t   transfer_queue)
+    : graphics_(device, frame_count, graphics_queue),
+      compute_(device, frame_count, compute_queue),
+      transfer_(device, frame_count, transfer_queue)
+{
+
+}
+
+void PerFramePerQueueCommandBuffers::newFrame()
+{
+    graphics_.newFrame();
+    compute_.newFrame();
+    transfer_.newFrame();
+}
+
+CommandBuffer PerFramePerQueueCommandBuffers::newGraphicsCommandBuffer()
+{
+    return graphics_.newCommandBuffer();
+}
+
+CommandBuffer PerFramePerQueueCommandBuffers::newComputeCommandBuffer()
+{
+    return compute_.newCommandBuffer();
+}
+
+CommandBuffer PerFramePerQueueCommandBuffers::newTransferCommandBuffer()
+{
+    return transfer_.newCommandBuffer();
 }
 
 VKPT_END

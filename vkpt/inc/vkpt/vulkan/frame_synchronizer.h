@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vkpt/common.h>
+#include <vkpt/vulkan/queue.h>
 
 VKPT_BEGIN
 
@@ -14,7 +14,7 @@ public:
 
     void newFrame();
 
-    vk::Fence getFrameEndingFence();
+    void endFrame(vk::ArrayProxy<const Queue> queues);
 
     void executeAfterSync(std::function<void()> func);
 
@@ -28,10 +28,13 @@ private:
     struct FenceInfo
     {
         bool will_be_signaled = false;
-        vk::UniqueFence fence;
+        std::vector<vk::Fence>       used_fences;
+        std::vector<vk::UniqueFence> fences;
 
         std::vector<std::function<void()>> delayed_functions;
     };
+
+    void wait(FenceInfo &info);
 
     vk::Device device_;
 

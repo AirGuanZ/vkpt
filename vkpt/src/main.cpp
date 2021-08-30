@@ -33,8 +33,8 @@ Pipeline createPipeline(Context &context)
                     .storeOp        = vk::AttachmentStoreOp::eStore,
                     .stencilLoadOp  = vk::AttachmentLoadOp::eDontCare,
                     .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
-                    .initialLayout  = vk::ImageLayout::eUndefined,
-                    .finalLayout    = vk::ImageLayout::ePresentSrcKHR,
+                    .initialLayout  = vk::ImageLayout::eColorAttachmentOptimal,
+                    .finalLayout    = vk::ImageLayout::eColorAttachmentOptimal,
                 }
             },
             .subpasses = {
@@ -46,16 +46,6 @@ Pipeline createPipeline(Context &context)
                             .layout     = vk::ImageLayout::eColorAttachmentOptimal
                         }
                     }
-                }
-            },
-            .dependencies = {
-                vk::SubpassDependency{
-                    .srcSubpass    = VK_SUBPASS_EXTERNAL,
-                    .dstSubpass    = 0,
-                    .srcStageMask  = vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                    .dstStageMask  = vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                    .srcAccessMask = {},
-                    .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite
                 }
             }
         },
@@ -142,8 +132,7 @@ UniqueBuffer createTriangleVertexBuffer(Context &context)
         },
         vma::MemoryUsage::eGPUOnly);
 
-    uploader.uploadBuffer(
-        buffer.get(), vertices, bytes, context.getGraphicsQueue());
+    uploader.uploadBuffer(buffer.get(), vertices, bytes);
     uploader.submitAndSync();
 
     return buffer;
@@ -180,8 +169,7 @@ void run()
 
     while(!context.getCloseFlag())
     {
-        if(!context.newFrame())
-            continue;
+        context.beginFrame();
 
         if(context.getInput()->isDown(KEY_ESCAPE))
             context.setCloseFlag(true);
@@ -189,6 +177,27 @@ void run()
         auto cmds = context.newFrameGraphicsCommandBuffer();
 
         cmds.begin();
+
+        cmds.pipelineBarrier(
+            {},
+            {},
+            vk::ImageMemoryBarrier2KHR{
+                .srcStageMask        = vk::PipelineStageFlagBits2KHR::eColorAttachmentOutput,
+                .dstStageMask        = vk::PipelineStageFlagBits2KHR::eColorAttachmentOutput,
+                .dstAccessMask       = vk::AccessFlagBits2KHR::eColorAttachmentWrite,
+                .oldLayout           = vk::ImageLayout::eUndefined,
+                .newLayout           = vk::ImageLayout::eColorAttachmentOptimal,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image               = context.getImage(),
+                .subresourceRange    = vk::ImageSubresourceRange{
+                .aspectMask          = vk::ImageAspectFlagBits::eColor,
+                    .baseMipLevel   = 0,
+                    .levelCount     = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount     = 1
+                }
+            });
 
         cmds.beginPipeline(
             pipeline,
@@ -200,6 +209,26 @@ void run()
         cmds.draw(3, 1, 0, 0);
 
         cmds.endPipeline();
+        
+        cmds.pipelineBarrier(
+            {},
+            {},
+            vk::ImageMemoryBarrier2KHR{
+                .srcStageMask        = vk::PipelineStageFlagBits2KHR::eColorAttachmentOutput,
+                .dstStageMask        = vk::PipelineStageFlagBits2KHR::eBottomOfPipe,
+                .oldLayout           = vk::ImageLayout::eColorAttachmentOptimal,
+                .newLayout           = vk::ImageLayout::ePresentSrcKHR,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image               = context.getImage(),
+                .subresourceRange    = vk::ImageSubresourceRange{
+                .aspectMask          = vk::ImageAspectFlagBits::eColor,
+                    .baseMipLevel   = 0,
+                    .levelCount     = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount     = 1
+                }
+            });
 
         cmds.end();
 
@@ -208,10 +237,12 @@ void run()
             { vk::PipelineStageFlagBits::eColorAttachmentOutput },
             { render_semaphores[context.getImageIndex()].get() },
             { cmds },
-            context.getFrameFence());
+            {});
 
         context.swapBuffers(
             render_semaphores[context.getImageIndex()].get());
+
+        context.endFrame();
     }
 }
 

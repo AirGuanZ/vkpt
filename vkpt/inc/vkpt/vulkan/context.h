@@ -3,10 +3,9 @@
 #include <span>
 
 #include <vkpt/vulkan/command_buffer.h>
-#include <vkpt/vulkan/frame_synchronizer.h>
+#include <vkpt/vulkan/frame_resources.h>
 #include <vkpt/vulkan/input.h>
 #include <vkpt/vulkan/queue.h>
-#include <vkpt/vulkan/perframe_command_buffers.h>
 #include <vkpt/vulkan/pipeline.h>
 #include <vkpt/vulkan/resource_allocator.h>
 #include <vkpt/vulkan/resource_uploader.h>
@@ -52,24 +51,34 @@ public:
 
     // vulkan frame
 
-    bool newFrame();
+    void beginFrame();
 
-    void nextFrameResources();
+    void endFrame();
+
+    void endFrame(vk::ArrayProxy<const Queue> queues);
 
     void swapBuffers(const vk::ArrayProxy<const vk::Semaphore> &wait_semaphores);
 
     void swapBuffers(vk::Semaphore wait_semaphore);
 
-    vk::Fence getFrameFence();
-
     CommandBuffer newFrameGraphicsCommandBuffer();
 
+    CommandBuffer newFrameComputeCommandBuffer();
+
     CommandBuffer newFrameTransferCommandBuffer();
+
+    vk::Fence newFrameFence();
+
+    vk::Semaphore newFrameSemaphore();
 
     void executeAfterFrameSync(std::function<void()> func);
 
     template<typename T>
     void destroyAfterFrameSync(T obj);
+
+    CommandBufferAllocator &getFrameCommandBufferAllocator();
+
+    SemaphoreAllocator &getFrameSemaphoreAllocator();
 
     // window events
 
@@ -96,6 +105,8 @@ public:
     vk::SwapchainKHR getSwapchain();
 
     Queue getGraphicsQueue();
+
+    Queue getComputeQueue();
 
     Queue getPresentQueue();
 
@@ -201,10 +212,12 @@ private:
     vk::Device         device_;
 
     vk::Queue graphics_queue_;
+    vk::Queue compute_queue_;
     vk::Queue present_queue_;
     vk::Queue transfer_queue_;
 
     uint32_t graphics_queue_family_;
+    uint32_t compute_queue_family_;
     uint32_t present_queue_family_;
     uint32_t transfer_queue_family_;
 
@@ -222,9 +235,7 @@ private:
     std::vector<vk::UniqueImageView> swapchain_image_views_;
     std::vector<vk::UniqueSemaphore> swapchain_image_available_semaphores_;
 
-    std::unique_ptr<FrameSynchronizer>      frame_sync_;
-    std::unique_ptr<PerFrameCommandBuffers> graphics_cmd_buffers_;
-    std::unique_ptr<PerFrameCommandBuffers> transfer_cmd_buffers_;
+    std::unique_ptr<FrameResources> frame_resources_;
 
     ResourceAllocator resource_allocator_;
 
@@ -237,7 +248,7 @@ private:
 template<typename T>
 void Context::destroyAfterFrameSync(T obj)
 {
-    frame_sync_->destroyAfterSync(std::move(obj));
+    frame_resources_->destroyAfterSync(std::move(obj));
 }
 
 VKPT_END

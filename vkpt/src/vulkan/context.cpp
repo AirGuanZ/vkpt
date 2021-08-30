@@ -172,9 +172,7 @@ Context::~Context()
 
         resource_allocator_ = ResourceAllocator();
 
-        frame_sync_.reset();
-        graphics_cmd_buffers_.reset();
-        transfer_cmd_buffers_.reset();
+        frame_resources_.reset();
 
         swapchain_image_available_semaphores_.clear();
         swapchain_image_views_.clear();
@@ -195,7 +193,7 @@ Context::~Context()
 void Context::waitIdle()
 {
     device_.waitIdle();
-    frame_sync_->_triggerAllSync();
+    frame_resources_->_triggerAllSync();
 }
 
 Input *Context::getInput()
@@ -203,20 +201,27 @@ Input *Context::getInput()
     return input_.get();
 }
 
-bool Context::newFrame()
+void Context::beginFrame()
 {
-    doEvents();
-    
-    if(isMinimized())
-        return false;
-    if(!acquireNextImage())
-        return false;
+    for(;;)
+    {
+        doEvents();
+        if(isMinimized() || !acquireNextImage())
+            continue;
+        break;
+    }
 
-    frame_sync_->newFrame();
-    graphics_cmd_buffers_->newFrame();
-    transfer_cmd_buffers_->newFrame();
+    frame_resources_->beginFrame();
+}
 
-    return true;
+void Context::endFrame()
+{
+    endFrame({ getGraphicsQueue() });
+}
+
+void Context::endFrame(vk::ArrayProxy<const Queue> queues)
+{
+    frame_resources_->endFrame(queues);
 }
 
 void Context::swapBuffers(
@@ -238,24 +243,44 @@ void Context::swapBuffers(vk::Semaphore wait_semaphore)
     this->swapBuffers(std::array{ wait_semaphore });
 }
 
-vk::Fence Context::getFrameFence()
-{
-    return frame_sync_->getFrameEndingFence();
-}
-
 CommandBuffer Context::newFrameGraphicsCommandBuffer()
 {
-    return graphics_cmd_buffers_->newCommandBuffer();
+    return frame_resources_->getCommandBufferAllocator().newGraphicsCommandBuffer();
+}
+
+CommandBuffer Context::newFrameComputeCommandBuffer()
+{
+    return frame_resources_->getCommandBufferAllocator().newComputeCommandBuffer();
 }
 
 CommandBuffer Context::newFrameTransferCommandBuffer()
 {
-    return transfer_cmd_buffers_->newCommandBuffer();
+    return frame_resources_->getCommandBufferAllocator().newTransferCommandBuffer();
+}
+
+vk::Fence Context::newFrameFence()
+{
+    return frame_resources_->getFenceAllocator().newFence();
+}
+
+vk::Semaphore Context::newFrameSemaphore()
+{
+    return frame_resources_->getSemaphoreAllocator().newSemaphore();
 }
 
 void Context::executeAfterFrameSync(std::function<void()> func)
 {
-    frame_sync_->executeAfterSync(std::move(func));
+    frame_resources_->executeAfterSync(std::move(func));
+}
+
+CommandBufferAllocator &Context::getFrameCommandBufferAllocator()
+{
+    return frame_resources_->getCommandBufferAllocator();
+}
+
+SemaphoreAllocator &Context::getFrameSemaphoreAllocator()
+{
+    return frame_resources_->getSemaphoreAllocator();
 }
 
 void Context::doEvents()
@@ -304,19 +329,25 @@ vk::SwapchainKHR Context::getSwapchain()
 Queue Context::getGraphicsQueue()
 {
     return Queue(
-        device_, graphics_queue_, graphics_queue_family_);
+        device_, graphics_queue_, Queue::Type::Graphics, graphics_queue_family_);
+}
+
+Queue Context::getComputeQueue()
+{
+    return Queue(
+        device_, present_queue_, Queue::Type::Compute, compute_queue_family_);
 }
 
 Queue Context::getPresentQueue()
 {
     return Queue(
-        device_, present_queue_, present_queue_family_);
+        device_, present_queue_, Queue::Type::Present, present_queue_family_);
 }
 
 Queue Context::getTransferQueue()
 {
     return Queue(
-        device_, transfer_queue_, transfer_queue_family_);
+        device_, transfer_queue_, Queue::Type::Transfer, transfer_queue_family_);
 }
 
 ResourceAllocator &Context::getResourceAllocator()
@@ -632,6 +663,8 @@ void Context::initializeVulkan(const Description &desc)
         .set_surface(surface_.get())
         .prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
         .set_minimum_version(1, 2)
+        .add_required_extension(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)
+        .require_separate_compute_queue()
         .require_dedicated_transfer_queue();
 
     if(desc.ray_tracing)
@@ -659,14 +692,19 @@ void Context::initializeVulkan(const Description &desc)
         throw VKPTException("failed to create vulkan device");
     impl_->device = build_device_result.value();
 
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(impl_->device.device);
+
     device_ = impl_->device.device;
 
     graphics_queue_ = impl_->device.get_queue(vkb::QueueType::graphics).value();
+    compute_queue_  = impl_->device.get_queue(vkb::QueueType::compute).value();
     present_queue_  = impl_->device.get_queue(vkb::QueueType::present).value();
     transfer_queue_ = impl_->device.get_queue(vkb::QueueType::transfer).value();
 
     graphics_queue_family_ = impl_->device.get_queue_index(
         vkb::QueueType::graphics).value();
+    compute_queue_family_ = impl_->device.get_queue_index(
+        vkb::QueueType::compute).value();
     present_queue_family_ = impl_->device.get_queue_index(
         vkb::QueueType::present).value();
     transfer_queue_family_ = impl_->device.get_queue_index(
@@ -685,17 +723,14 @@ void Context::initializeVulkan(const Description &desc)
         swapchain_image_available_semaphores_[i] = std::move(semaphore);
     }
 
-    // frame sync
+    // frame resources
 
-    frame_sync_ = std::make_unique<FrameSynchronizer>(device_, image_count_);
-
-    // cmd buffers
-
-    graphics_cmd_buffers_ = std::make_unique<PerFrameCommandBuffers>(
-        device_, image_count_, graphics_queue_family_);
-    transfer_cmd_buffers_ = std::make_unique<PerFrameCommandBuffers>(
-        device_, image_count_, transfer_queue_family_);
-
+    frame_resources_ = std::make_unique<FrameResources>(
+        device_, image_count_,
+        getGraphicsQueue(),
+        getComputeQueue(),
+        getTransferQueue());
+    
     // resource allocator
 
     resource_allocator_ =
