@@ -4,6 +4,3 @@
 [submodule "3rdparty/shaderc"]
 	path = 3rdparty/shaderc
 	url = https://github.com/google/shaderc.git
-[submodule "3rdparty/vk-bootstrap"]
-	path = 3rdparty/vk-bootstrap
-	url = https://github.com/charles-lunarg/vk-bootstrap
