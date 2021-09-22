@@ -223,10 +223,10 @@ bool Context::isImGuiEnabled() const
     return imgui_ != nullptr;
 }
 
-ImGuiIntegration *Context::getImGuiIntegration()
+ImGuiIntegration &Context::getImGuiIntegration()
 {
     assert(imgui_);
-    return imgui_.get();
+    return *imgui_;
 }
 
 void Context::waitIdle()
@@ -360,28 +360,6 @@ vk::UniqueFence Context::createFence(bool signaled)
 
     return device_.createFenceUnique(vk::FenceCreateInfo{
         .flags = flags
-    });
-}
-
-vk::UniqueFramebuffer Context::createFramebuffer(
-    const Pipeline                     &pipeline,
-    vk::ArrayProxy<const vk::ImageView> attachments,
-    uint32_t                            width,
-    uint32_t                            height)
-{
-    if(!width && !height)
-    {
-        width  = pipeline.getDefaultRect().extent.width;
-        height = pipeline.getDefaultRect().extent.height;
-    }
-
-    return device_.createFramebufferUnique(vk::FramebufferCreateInfo{
-        .renderPass      = pipeline.getRenderPass(),
-        .attachmentCount = attachments.size(),
-        .pAttachments    = attachments.data(),
-        .width           = width,
-        .height          = height,
-        .layers          = 1
     });
 }
 

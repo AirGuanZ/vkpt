@@ -1,6 +1,7 @@
 #pragma once
 
-#include <vkpt/object/object.h>
+#include <vkpt/object/framebuffer.h>
+#include <vkpt/object/image.h>
 
 VKPT_BEGIN
 
@@ -25,7 +26,13 @@ class RenderPass :
 {
 public:
 
+    static RenderPass build(vk::Device device, RenderPassDescription desc);
 
+    using Object::Object;
+
+    VKPT_USING_OBJECT_METHODS(vk::RenderPass);
+
+    Framebuffer createFramebuffer(std::vector<ImageView> image_views) const;
 };
 
 VKPT_END

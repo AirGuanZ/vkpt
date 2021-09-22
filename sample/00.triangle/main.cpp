@@ -24,7 +24,7 @@ Pipeline createPipeline(Context &context)
             .source_name = "./asset/fragment.glsl",
             .entry_name = "main"
         },
-        .attachments = {
+        .render_pass = std::vector{
             Attachment{
                 .format   = context.getImageFormat(),
                 .samples  = vk::SampleCountFlagBits::e1,
@@ -43,8 +43,6 @@ Pipeline createPipeline(Context &context)
         },
         .vertex_input_attributes = Vertex::getVertexInputAttributes(),
         .input_topology = vk::PrimitiveTopology::eTriangleList,
-        .viewports = { { } },
-        .scissors = { { } },
         .rasterization = {
             .depthClampEnable        = false,
             .rasterizerDiscardEnable = false,
@@ -75,16 +73,14 @@ Pipeline createPipeline(Context &context)
     });
 }
 
-std::vector<vk::UniqueFramebuffer> createFramebuffers(
+std::vector<Framebuffer> createFramebuffers(
     Context &context, const Pipeline &pipeline)
 {
-    std::vector<vk::UniqueFramebuffer> result;
+    std::vector<Framebuffer> result;
     for(uint32_t i = 0; i < context.getImageCount(); ++i)
     {
-        result.push_back(context.createFramebuffer(
-            pipeline, { context.getImageView(i) },
-            context.getFramebufferSizeX(),
-            context.getFramebufferSizeY()));
+        result.push_back(pipeline.getRenderPass()
+            .createFramebuffer({ context.getImageView(i) }));
     }
     return result;
 }
@@ -140,7 +136,7 @@ void run()
 
     AGZ_SCOPE_GUARD({ context.waitIdle(); });
 
-    auto imgui = context.getImGuiIntegration();
+    auto &imgui = context.getImGuiIntegration();
 
     while(!context.getCloseFlag())
     {
@@ -152,7 +148,7 @@ void run()
             context.setCloseFlag(true);
 
         frame_resources.beginFrame();
-        imgui->newFrame();
+        imgui.newFrame();
 
         if(ImGui::Begin("vkpt", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
@@ -169,9 +165,7 @@ void run()
         triangle_pass->setCallback([&](CommandBuffer &command_buffer)
         {
             command_buffer.beginPipeline(
-                pipeline,
-                framebuffers[context.getImageIndex()].get(),
-                context.getFramebufferRect(),
+                pipeline, framebuffers[context.getImageIndex()],
                 { vk::ClearColorValue{ std::array{ 0.0f, 0.0f, 0.0f, 0.0f } } });
 
             command_buffer.setViewport(
@@ -185,14 +179,14 @@ void run()
             command_buffer.endPipeline();
         });
 
-        auto imgui_pass = imgui->addToGraph(context.getImageView(), graph);
+        auto imgui_pass = imgui.addToGraph(context.getImageView(), graph);
 
         auto present_pass = context.addPresentImagePass(graph);
 
         graph.addDependency(
             acquire_pass, triangle_pass, imgui_pass, present_pass);
 
-        graph.optimize();
+        graph.finalize();
         graph.execute(frame_resources);
 
         context.swapBuffers();

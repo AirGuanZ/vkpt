@@ -2,7 +2,6 @@
 
 #include <agz-utils/misc.h>
 
-#include <vkpt/object/framebuffer.h>
 #include <vkpt/object/render_pass.h>
 #include <vkpt/descriptor_set.h>
 
@@ -28,16 +27,21 @@ struct PipelineShaderSource
 
 struct PipelineDescription
 {
-    using Shader = agz::misc::variant_t<
+    using InternalShader = agz::misc::variant_t<
         PipelineShaderSource,
         vk::PipelineShaderStageCreateInfo>;
 
+    using InternalRenderPass = agz::misc::variant_t<
+        std::vector<Attachment>,
+        RenderPass>;
+
     vk::PipelineCreateFlags flags = {};
 
-    Shader vertex_shader;
-    Shader fragment_shader;
+    InternalShader vertex_shader;
+    InternalShader fragment_shader;
+    
+    InternalRenderPass render_pass;
 
-    std::vector<Attachment>   attachments;
     PipelineLayoutDescription layout;
 
     std::vector<vk::VertexInputBindingDescription>   vertex_input_bindings;
@@ -56,8 +60,6 @@ struct PipelineDescription
     std::array<float, 4>                               blend_constants = {};
 
     std::vector<vk::DynamicState> dynamic_states;
-
-    Pipeline build(vk::Device device);
 };
 
 class Pipeline : public agz::misc::uncopyable_t
@@ -76,27 +78,22 @@ public:
 
     vk::Pipeline getPipeline() const;
 
-    vk::RenderPass getRenderPass() const;
+    const RenderPass &getRenderPass() const;
 
-    const vk::Viewport &getDefaultViewport() const;
-
-    const vk::Rect2D &getDefaultRect() const;
+    Framebuffer createFramebuffer(std::vector<ImageView> image_views);
 
 private:
 
     Pipeline(
         vk::UniquePipeline               pipeline,
         vk::UniquePipelineLayout         layout,
-        vk::UniqueRenderPass             render_pass,
+        RenderPass                       render_pass,
         std::vector<DescriptorSetLayout> set_layouts);
 
     vk::UniquePipeline               pipeline_;
     vk::UniquePipelineLayout         layout_;
-    vk::UniqueRenderPass             render_pass_;
+    RenderPass                       render_pass_;
     std::vector<DescriptorSetLayout> set_layouts_;
-
-    vk::Viewport default_viewport_;
-    vk::Rect2D   default_rect_;
 };
 
 VKPT_END

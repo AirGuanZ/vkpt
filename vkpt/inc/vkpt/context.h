@@ -54,7 +54,7 @@ public:
 
     bool isImGuiEnabled() const;
 
-    ImGuiIntegration *getImGuiIntegration();
+    ImGuiIntegration &getImGuiIntegration();
 
     // vulkan frame
 
@@ -105,12 +105,6 @@ public:
     std::vector<vk::UniqueSemaphore> createSemaphores(uint32_t count);
 
     vk::UniqueFence createFence(bool signaled = false);
-
-    vk::UniqueFramebuffer createFramebuffer(
-        const Pipeline                     &pipeline,
-        vk::ArrayProxy<const vk::ImageView> attachments,
-        uint32_t                            width  = 0,
-        uint32_t                            height = 0);
 
     // pipeline
 

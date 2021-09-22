@@ -72,53 +72,16 @@ Pipeline Pipeline::build(vk::Device device, const PipelineDescription &desc)
 
     // render pass
 
-    std::vector<vk::AttachmentDescription> attachments;
-    std::vector<vk::AttachmentReference>   color_references;
-    vk::AttachmentReference                depth_stencil_reference;
-    
-    for(auto &a : desc.attachments)
+    RenderPass render_pass;
+
+    if(auto desc_attachments = desc.render_pass.as_if<std::vector<Attachment>>())
     {
-        const uint32_t index = static_cast<uint32_t>(attachments.size());
-
-        attachments.push_back(vk::AttachmentDescription{
-            .format         = a.format,
-            .samples        = a.samples,
-            .loadOp         = a.load_op,
-            .storeOp        = a.store_op,
-            .stencilLoadOp  = a.stencil_load_op,
-            .stencilStoreOp = a.stencil_store_op,
-            .initialLayout  = a.layout,
-            .finalLayout    = a.layout
-        });
-
-        auto attachment_reference = vk::AttachmentReference{
-            .attachment = index,
-            .layout     = a.layout
-        };
-
-        if(isDepthStencilFormat(a.format))
-            depth_stencil_reference = attachment_reference;
-        else
-            color_references.push_back(attachment_reference);
+        render_pass = RenderPass::build(device, RenderPassDescription{
+            .attachments = *desc_attachments
+            });
     }
-
-    vk::SubpassDescription subpass_desc = {
-        .pipelineBindPoint       = vk::PipelineBindPoint::eGraphics,
-        .colorAttachmentCount    = static_cast<uint32_t>(color_references.size()),
-        .pColorAttachments       = color_references.data(),
-        .pDepthStencilAttachment =
-            color_references.size() == attachments.size() ?
-            nullptr : &depth_stencil_reference
-    };
-
-    vk::RenderPassCreateInfo render_pass_create_info = {
-        .attachmentCount = static_cast<uint32_t>(attachments.size()),
-        .pAttachments    = attachments.data(),
-        .subpassCount    = 1,
-        .pSubpasses      = &subpass_desc
-    };
-
-    auto render_pass = device.createRenderPassUnique(render_pass_create_info);
+    else
+        render_pass = desc.render_pass.as<RenderPass>();
 
     // pipeline layout
 
@@ -158,6 +121,20 @@ Pipeline Pipeline::build(vk::Device device, const PipelineDescription &desc)
         .scissorCount  = static_cast<uint32_t>(desc.scissors.size()),
         .pScissors     = desc.scissors.data()
     };
+
+    if(!viewport_state.viewportCount)
+    {
+        static const vk::Viewport empty_viewport = {};
+        viewport_state.viewportCount = 1;
+        viewport_state.pViewports    = &empty_viewport;
+    }
+
+    if(!viewport_state.scissorCount)
+    {
+        static const vk::Rect2D empty_scissor = {};
+        viewport_state.scissorCount = 1;
+        viewport_state.pScissors    = &empty_scissor;
+    }
 
     // color blend
 
@@ -202,9 +179,6 @@ Pipeline Pipeline::build(vk::Device device, const PipelineDescription &desc)
         std::move(render_pass),
         desc.layout.set_layouts);
 
-    result.default_viewport_ = desc.viewports[0];
-    result.default_rect_     = desc.scissors[0];
-
     return result;
 }
 
@@ -218,25 +192,20 @@ vk::Pipeline Pipeline::getPipeline() const
     return pipeline_.get();
 }
 
-vk::RenderPass Pipeline::getRenderPass() const
+const RenderPass &Pipeline::getRenderPass() const
 {
-    return render_pass_.get();
+    return render_pass_;
 }
 
-const vk::Viewport &Pipeline::getDefaultViewport() const
+Framebuffer Pipeline::createFramebuffer(std::vector<ImageView> image_views)
 {
-    return default_viewport_;
-}
-
-const vk::Rect2D &Pipeline::getDefaultRect() const
-{
-    return default_rect_;
+    return render_pass_.createFramebuffer(std::move(image_views));
 }
 
 Pipeline::Pipeline(
     vk::UniquePipeline               pipeline,
     vk::UniquePipelineLayout         layout,
-    vk::UniqueRenderPass             render_pass,
+    RenderPass                       render_pass,
     std::vector<DescriptorSetLayout> set_layouts)
     : pipeline_(std::move(pipeline)),
       layout_(std::move(layout)),

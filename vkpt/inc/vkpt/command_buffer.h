@@ -20,8 +20,7 @@ public:
 
     void beginPipeline(
         const Pipeline                      &pipeline,
-        vk::Framebuffer                      framebuffer,
-        const vk::Rect2D                    &render_area,
+        const Framebuffer                   &framebuffer,
         vk::ArrayProxy<const vk::ClearValue> clear_values);
 
     void endPipeline();

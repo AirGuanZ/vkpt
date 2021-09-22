@@ -18,7 +18,7 @@ VKPT_RENDER_GRAPH_BEGIN
 
 class Compiler;
 class Graph;
-class Optimizer;
+class Finalizer;
 class PassContext;
 
 struct BufferState
@@ -144,7 +144,7 @@ private:
     friend class agz::alloc::object_releaser_t;
     friend class Compiler;
     friend class Graph;
-    friend class Optimizer;
+    friend class Finalizer;
 
     Queue *queue_;
     int    index_;
@@ -182,9 +182,7 @@ public:
     template<typename...Args>
     void addDependency(Args...passes);
 
-    void validate();
-
-    void optimize();
+    void finalize();
 
     void execute(
         SemaphoreAllocator          &semaphore_allocator,
@@ -197,10 +195,10 @@ public:
 
 private:
 
-    void addDependency(std::initializer_list<Pass *> passes);
-
     friend class Compiler;
-    friend class Optimizer;
+    friend class Finalizer;
+
+    void addDependency(std::initializer_list<Pass *> passes);
 
     agz::alloc::memory_resource_arena_t memory_arena_;
     agz::alloc::object_releaser_t       object_arena_;

@@ -14,7 +14,7 @@ void run()
     });
 
     auto frame_resources = context.createFrameResources();
-    auto imgui = context.getImGuiIntegration();
+    auto &imgui = context.getImGuiIntegration();
 
     AGZ_SCOPE_GUARD({ context.waitIdle(); });
 
@@ -28,19 +28,24 @@ void run()
             context.setCloseFlag(true);
 
         frame_resources.beginFrame();
-        imgui->newFrame();
+        imgui.newFrame();
+
+        if(ImGui::Begin("deferred", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            
+        }
+        ImGui::End();
 
         rg::Graph graph;
 
         auto acquire_pass = context.addAcquireImagePass(graph);
         auto present_pass = context.addPresentImagePass(graph);
 
-        auto imgui_pass = imgui->addToGraph(
-            context.getImage(), context.getImageView(), graph);
+        auto imgui_pass = imgui.addToGraph(context.getImageView(), graph);
 
         graph.addDependency(acquire_pass, imgui_pass, present_pass);
 
-        graph.optimize();
+        graph.finalize();
         graph.execute(frame_resources);
 
         context.swapBuffers();

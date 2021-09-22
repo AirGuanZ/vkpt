@@ -1,19 +1,20 @@
-#include <vkpt/graph/optimizer.h>
+#include <vkpt/graph/finalizer.h>
 
 VKPT_RENDER_GRAPH_BEGIN
 
-Optimizer::Optimizer()
+Finalizer::Finalizer()
     : buffers_(&memory_), images_(&memory_)
 {
     
 }
 
-void Optimizer::optimize(Graph &graph)
+void Finalizer::finalize(Graph &graph)
 {
     sorted_passes_ = topologySortPasses(graph);
-    removed_ = Vector<bool>(graph.passes_.size(), false, &memory_);
 
     collectResourceUsers();
+
+    removed_ = Vector<bool>(graph.passes_.size(), false, &memory_);
 
     removeUnnecessaryPrepasses(graph);
     removeUnnecessaryPostpasses(graph);
@@ -31,7 +32,7 @@ void Optimizer::optimize(Graph &graph)
     graph.passes_ = std::move(new_passes);
 }
 
-Vector<Pass*> Optimizer::topologySortPasses(Graph &graph)
+Vector<Pass*> Finalizer::topologySortPasses(Graph &graph)
 {
     PmrQueue<Pass *> next_passes(&memory_);
     Vector<int> head_count(graph.passes_.size(), &memory_);
@@ -64,7 +65,7 @@ Vector<Pass*> Optimizer::topologySortPasses(Graph &graph)
     return result;
 }
 
-void Optimizer::collectResourceUsers()
+void Finalizer::collectResourceUsers()
 {
     auto update_record = [](auto &record, Pass *pass, const auto &usage)
     {
@@ -113,7 +114,7 @@ void Optimizer::collectResourceUsers()
     }
 }
 
-bool Optimizer::isUnnecessaryPrepass(Pass *pass)
+bool Finalizer::isUnnecessaryPrepass(Pass *pass)
 {
     if(!pass->heads_.empty())
         return false;
@@ -151,7 +152,7 @@ bool Optimizer::isUnnecessaryPrepass(Pass *pass)
         if(pass->queue_->getFamilyIndex() != next_user->queue_->getFamilyIndex())
             return false;
     }
-    
+
     for(auto &[image_key, _] : pass->image_usages_)
     {
         auto &image = image_key.first;
@@ -180,7 +181,7 @@ bool Optimizer::isUnnecessaryPrepass(Pass *pass)
     return true;
 }
 
-bool Optimizer::isUnnecessaryPostpass(Pass *pass)
+bool Finalizer::isUnnecessaryPostpass(Pass *pass)
 {
     if(!pass->tails_.empty())
         return false;
@@ -244,7 +245,7 @@ bool Optimizer::isUnnecessaryPostpass(Pass *pass)
     return true;
 }
 
-void Optimizer::removeUnnecessaryPrepasses(Graph &graph)
+void Finalizer::removeUnnecessaryPrepasses(Graph &graph)
 {
     for(auto pass : graph.passes_)
     {
@@ -319,7 +320,7 @@ void Optimizer::removeUnnecessaryPrepasses(Graph &graph)
     }
 }
 
-void Optimizer::removeUnnecessaryPostpasses(Graph &graph)
+void Finalizer::removeUnnecessaryPostpasses(Graph &graph)
 {
     for(auto pass : graph.passes_)
     {

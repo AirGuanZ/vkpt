@@ -1,5 +1,5 @@
 #include <vkpt/graph/compiler.h>
-#include <vkpt/graph/optimizer.h>
+#include <vkpt/graph/finalizer.h>
 #include <vkpt/context.h>
 
 VKPT_RENDER_GRAPH_BEGIN
@@ -150,15 +150,10 @@ Pass *Graph::addPass(Queue *queue, Pass::Callback callback)
     return pass;
 }
 
-void Graph::validate()
+void Graph::finalize()
 {
-    // TODO
-}
-
-void Graph::optimize()
-{
-    Optimizer optimizer;
-    optimizer.optimize(*this);
+    Finalizer finalizer;
+    finalizer.finalize(*this);
 }
 
 void Graph::execute(

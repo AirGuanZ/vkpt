@@ -4,13 +4,13 @@
 
 VKPT_RENDER_GRAPH_BEGIN
 
-class Optimizer
+class Finalizer
 {
 public:
 
-    Optimizer();
+    Finalizer();
 
-    void optimize(Graph &graph);
+    void finalize(Graph &graph);
 
 private:
 
@@ -43,8 +43,8 @@ private:
     Vector<Pass *> sorted_passes_;
     Vector<bool>   removed_;
 
-    Map<vk::Buffer, BufferRecord>                                 buffers_;
-    Map<std::pair<vk::Image, vk::ImageSubresource>, ImageRecord>  images_;
+    Map<vk::Buffer, BufferRecord>                                buffers_;
+    Map<std::pair<vk::Image, vk::ImageSubresource>, ImageRecord> images_;
 };
 
 VKPT_RENDER_GRAPH_END

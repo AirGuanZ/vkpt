@@ -37,10 +37,16 @@ void CommandBuffer::end()
 
 void CommandBuffer::beginPipeline(
     const Pipeline                      &pipeline,
-    vk::Framebuffer                      framebuffer,
-    const vk::Rect2D                    &render_area,
+    const Framebuffer                   &framebuffer,
     vk::ArrayProxy<const vk::ClearValue> clear_values)
 {
+    const auto &fb_desc = framebuffer.getDescription();
+
+    const vk::Rect2D render_area = {
+        .offset = { 0, 0 },
+        .extent = { fb_desc.width, fb_desc.height }
+    };
+
     impl_.beginRenderPass(vk::RenderPassBeginInfo{
         .renderPass      = pipeline.getRenderPass(),
         .framebuffer     = framebuffer,
