@@ -2,13 +2,14 @@
 
 #include <span>
 
+#include <vkpt/allocator/resource_allocator.h>
+#include <vkpt/frame/frame_resources.h>
 #include <vkpt/graph/graph.h>
 #include <vkpt/object/pipeline.h>
 #include <vkpt/object/queue.h>
-#include <vkpt/frame_resources.h>
+#include <vkpt/object/semaphore.h>
 #include <vkpt/imgui.h>
 #include <vkpt/input.h>
-#include <vkpt/resource_allocator.h>
 #include <vkpt/resource_uploader.h>
 
 struct GLFWwindow;
@@ -100,9 +101,11 @@ public:
 
     ResourceUploader createGraphicsResourceUploader();
 
-    vk::UniqueSemaphore createSemaphore();
+    std::vector<BinarySemaphore> createBinarySemaphores(uint32_t count);
 
-    std::vector<vk::UniqueSemaphore> createSemaphores(uint32_t count);
+    BinarySemaphore createBinarySemaphore();
+
+    TimelineSemaphore createTimelineSemaphore();
 
     vk::UniqueFence createFence(bool signaled = false);
 
@@ -112,12 +115,6 @@ public:
         const DescriptorSetLayoutDescription &desc);
 
     Pipeline createGraphicsPipeline(const PipelineDescription &desc);
-
-    // render graph
-
-    rg::Pass *addAcquireImagePass(rg::Graph &graph);
-
-    rg::Pass *addPresentImagePass(rg::Graph &graph);
 
     // swapchain
 
@@ -145,9 +142,9 @@ public:
 
     ImageView getImageView(uint32_t index) const;
 
-    vk::Semaphore getImageAvailableSemaphore() const;
+    BinarySemaphore getImageAvailableSemaphore() const;
 
-    vk::Semaphore getPresentAvailableSemaphore() const;
+    BinarySemaphore getPresentAvailableSemaphore() const;
 
     uint32_t getImageIndex() const;
 
@@ -209,15 +206,15 @@ private:
 
     uint32_t               image_count_;
     vk::UniqueSwapchainKHR swapchain_;
-    ImageDescription       swapchain_image_desc_;
+    Image::Description     swapchain_image_desc_;
 
     uint32_t image_index_          = 0;
     uint32_t frame_resource_index_ = 0;
 
-    std::vector<Image>               swapchain_images_;
-    std::vector<ImageView>           swapchain_image_views_;
-    std::vector<vk::UniqueSemaphore> swapchain_image_available_semaphores_;
-    std::vector<vk::UniqueSemaphore> swapchain_present_semaphores_;
+    std::vector<Image>           swapchain_images_;
+    std::vector<ImageView>       swapchain_image_views_;
+    std::vector<BinarySemaphore> swapchain_image_available_semaphores_;
+    std::vector<BinarySemaphore> swapchain_present_semaphores_;
 
     ResourceAllocator resource_allocator_;
 

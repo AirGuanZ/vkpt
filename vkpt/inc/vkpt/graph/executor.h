@@ -2,11 +2,13 @@
 
 #include <vkpt/graph/graph.h>
 
-VKPT_RENDER_GRAPH_BEGIN
+VKPT_GRAPH_BEGIN
 
 struct ExecutablePass
 {
-    Pass::Callback *callback = nullptr;
+    explicit ExecutablePass(std::pmr::memory_resource &memory);
+
+    const Pass::Callback *callback = nullptr;
 
     Vector<vk::MemoryBarrier2KHR>       pre_memory_barriers;
     Vector<vk::BufferMemoryBarrier2KHR> pre_buffer_barriers;
@@ -19,10 +21,10 @@ struct ExecutablePass
 
 struct ExecutableGroup
 {
-    Queue *queue = nullptr;
+    explicit ExecutableGroup(std::pmr::memory_resource &memory);
 
-    Vector<vk::CommandBufferSubmitInfoKHR> command_buffers;
-    Vector<ExecutablePass>                 passes;
+    const Queue           *queue;
+    Vector<ExecutablePass> passes;
 
     Vector<vk::SemaphoreSubmitInfoKHR> wait_semaphores;
     Vector<vk::SemaphoreSubmitInfoKHR> signal_semaphores;
@@ -31,38 +33,36 @@ struct ExecutableGroup
 
 struct ExecutableGraph
 {
+    explicit ExecutableGraph(std::pmr::memory_resource &memory);
+
     Vector<ExecutableGroup> groups;
-};
 
-class PassContext
-{
-public:
-
-    PassContext(
-        Queue::Type             type,
-        ExecutableGroup        &group,
-        CommandBufferAllocator &command_buffer_allocator);
-
-    CommandBuffer getCommandBuffer();
-
-    CommandBuffer newCommandBuffer();
-
-private:
-
-    Queue::Type             type_;
-    ExecutableGroup        &exec_group_;
-    CommandBufferAllocator &command_buffer_allocator_;
+    Map<Buffer, ResourceState>           buffer_final_states;
+    Map<ImageSubresource, ResourceState> image_final_states;
 };
 
 class Executor
 {
 public:
 
+    Executor();
+
     void record(
         CommandBufferAllocator &command_buffer_allocator,
-        ExecutableGraph        &graph);
+        const ExecutableGraph  &graph);
 
-    void submit(ExecutableGraph &graph);
+    void submit();
+
+private:
+
+    struct GroupResult
+    {
+        const ExecutableGroup                 *group;
+        Vector<vk::CommandBufferSubmitInfoKHR> command_buffers;
+    };
+
+    agz::alloc::memory_resource_arena_t memory_;
+    Vector<GroupResult>                 group_results_;
 };
 
-VKPT_RENDER_GRAPH_END
+VKPT_GRAPH_END

@@ -1,7 +1,7 @@
 #pragma once
 
+#include <vkpt/allocator/resource_allocator.h>
 #include <vkpt/object/queue.h>
-#include <vkpt/resource_allocator.h>
 
 VKPT_BEGIN
 
@@ -15,22 +15,9 @@ public:
     ~ResourceUploader();
 
     void uploadBuffer(
-        vk::Buffer  dst_buffer,
+        Buffer      dst_buffer,
         const void *data,
         size_t      bytes);
-
-    // upload and release ownership
-    void uploadBuffer(
-        vk::Buffer  dst_buffer,
-        const void *data,
-        size_t      bytes,
-        uint32_t    dst_queue_family_index);
-    
-    void uploadBuffer(
-        vk::Buffer   dst_buffer,
-        const void  *data,
-        size_t       bytes,
-        const Queue &dst_queue);
 
     void submitAndSync();
 

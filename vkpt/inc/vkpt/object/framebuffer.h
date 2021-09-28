@@ -1,7 +1,7 @@
 #pragma once
 
-#include <vkpt/object/image.h>
 #include <vkpt/object/object.h>
+#include <vkpt/resource/image.h>
 
 VKPT_BEGIN
 
@@ -11,8 +11,6 @@ struct FramebufferDescription
     uint32_t               width;
     uint32_t               height;
 };
-
-using Framebuffer =
 
 class Framebuffer : public Object<
     vk::Framebuffer, vk::UniqueFramebuffer, FramebufferDescription>

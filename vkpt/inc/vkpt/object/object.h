@@ -61,12 +61,10 @@ Object<O, OStorage, Description>::Object(
     OStorage object, Description desc, Deleter deleter)
 {
     auto record = new Record{ std::move(object), std::move(desc) };
-    agz::misc::fixed_scope_guard_t guard([&]
-    {
+    AGZ_SCOPE_FAIL{
         deleter(record);
-    });
+    };
     record_ = std::shared_ptr<Record>(record, deleter);
-    guard.dismiss();
 }
 
 template<typename O, typename OStorage, typename Description>

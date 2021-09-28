@@ -1,3 +1,4 @@
+#include <vkpt/object/pipeline.h>
 #include <vkpt/command_buffer.h>
 
 VKPT_BEGIN

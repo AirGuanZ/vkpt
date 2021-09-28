@@ -2,6 +2,7 @@
 #include <imgui/imgui_impl_glfw.h>
 #include <VkBootstrap.h>
 
+#include <vkpt/resource/image_impl.h>
 #include <vkpt/context.h>
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
@@ -241,7 +242,7 @@ Input *Context::getInput()
 
 void Context::swapBuffers()
 {
-    auto present_semaphore = getPresentAvailableSemaphore();
+    auto present_semaphore = getPresentAvailableSemaphore().get();
     auto swapchain = swapchain_.get();
 
     (void)present_queue_.getRaw().presentKHR(
@@ -339,17 +340,31 @@ ResourceUploader Context::createGraphicsResourceUploader()
     return ResourceUploader(getGraphicsQueue(), resource_allocator_);
 }
 
-vk::UniqueSemaphore Context::createSemaphore()
+std::vector<BinarySemaphore> Context::createBinarySemaphores(uint32_t count)
 {
-    return device_.createSemaphoreUnique(vk::SemaphoreCreateInfo{});
+    std::vector<BinarySemaphore> result;
+    for(uint32_t i = 0; i < count; ++i)
+        result.push_back(createBinarySemaphore());
+    return result;
 }
 
-std::vector<vk::UniqueSemaphore> Context::createSemaphores(uint32_t count)
+BinarySemaphore Context::createBinarySemaphore()
 {
-    std::vector<vk::UniqueSemaphore> result;
-    for(uint32_t i = 0; i < count; ++i)
-        result.push_back(createSemaphore());
-    return result;
+    auto semaphore = device_.createSemaphoreUnique({});
+    return BinarySemaphore(std::move(semaphore));
+}
+
+TimelineSemaphore Context::createTimelineSemaphore()
+{
+    const vk::SemaphoreTypeCreateInfo real_create_info = {
+        .semaphoreType = vk::SemaphoreType::eTimeline,
+        .initialValue  = 0
+    };
+    const vk::SemaphoreCreateInfo create_info = {
+        .pNext = &real_create_info
+    };
+    auto semaphore = device_.createSemaphoreUnique(create_info);
+    return TimelineSemaphore(std::move(semaphore), 0);
 }
 
 vk::UniqueFence Context::createFence(bool signaled)
@@ -374,44 +389,6 @@ Pipeline Context::createGraphicsPipeline(const PipelineDescription &desc)
     return Pipeline::build(device_, desc);
 }
 
-rg::Pass *Context::addAcquireImagePass(rg::Graph &graph)
-{
-    auto pass = graph.addPass(getPresentQueue());
-    pass->wait(
-        getImageAvailableSemaphore(),
-        vk::PipelineStageFlagBits2KHR::eColorAttachmentOutput);
-    pass->use(
-        getImage(), vk::ImageSubresourceRange{
-            .aspectMask     = vk::ImageAspectFlagBits::eColor,
-            .baseMipLevel   = 0,
-            .levelCount     = 1,
-            .baseArrayLayer = 0,
-            .layerCount     = 1,
-        },
-        vk::PipelineStageFlagBits2KHR::eColorAttachmentOutput,
-        {}, vk::ImageLayout::eUndefined);
-    return pass;
-}
-
-rg::Pass *Context::addPresentImagePass(rg::Graph &graph)
-{
-    auto pass = graph.addPass(getPresentQueue());
-    pass->use(
-        getImage(), vk::ImageSubresourceRange{
-            .aspectMask     = vk::ImageAspectFlagBits::eColor,
-            .baseMipLevel   = 0,
-            .levelCount     = 1,
-            .baseArrayLayer = 0,
-            .layerCount     = 1,
-        },
-        vk::PipelineStageFlagBits2KHR::eBottomOfPipe,
-        {}, vk::ImageLayout::ePresentSrcKHR);
-    pass->signal(
-        getPresentAvailableSemaphore(),
-        vk::PipelineStageFlagBits2KHR::eAllCommands);
-    return pass;
-}
-
 void Context::recreateSwapchain()
 {
     waitIdle();
@@ -431,8 +408,8 @@ bool Context::acquireNextImage()
 {
     frame_resource_index_ = (frame_resource_index_ + 1) % image_count_;
 
-    auto &image_available_semaphore
-        = swapchain_image_available_semaphores_[frame_resource_index_].get();
+    auto image_available_semaphore =
+        swapchain_image_available_semaphores_[frame_resource_index_];
 
     auto acquire_result = device_.acquireNextImageKHR(
         swapchain_.get(), UINT64_MAX,
@@ -450,6 +427,14 @@ bool Context::acquireNextImage()
         throw VKPTException(
             "failed to acquire next swapchain image");
     }
+
+    getImage().getState({ vk::ImageAspectFlagBits::eColor, 0, 0 }) =
+        UsingState{
+            .queue  = getPresentQueue(),
+            .stages = vk::PipelineStageFlagBits2KHR::eNone,
+            .access = vk::AccessFlagBits2KHR::eNone,
+            .layout = vk::ImageLayout::eUndefined
+        };
 
     return true;
 }
@@ -517,14 +502,14 @@ ImageView Context::getImageView(uint32_t index) const
     return swapchain_image_views_[index];
 }
 
-vk::Semaphore Context::getImageAvailableSemaphore() const
+BinarySemaphore Context::getImageAvailableSemaphore() const
 {
-    return swapchain_image_available_semaphores_[frame_resource_index_].get();
+    return swapchain_image_available_semaphores_[frame_resource_index_];
 }
 
-vk::Semaphore Context::getPresentAvailableSemaphore() const
+BinarySemaphore Context::getPresentAvailableSemaphore() const
 {
-    return swapchain_present_semaphores_[frame_resource_index_].get();
+    return swapchain_present_semaphores_[frame_resource_index_];
 }
 
 uint32_t Context::getImageIndex() const
@@ -667,6 +652,14 @@ void Context::initializeVulkan(const Description &desc)
         .require_separate_compute_queue()
         .require_dedicated_transfer_queue();
 
+    physical_device_selector.add_required_extension(
+        VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+
+    vk::PhysicalDeviceTimelineSemaphoreFeatures timeline_semaphore_features;
+    timeline_semaphore_features.timelineSemaphore = true;
+    physical_device_selector.add_required_extension_features(
+        timeline_semaphore_features);
+
     if(desc.ray_tracing)
     {
         physical_device_selector
@@ -725,8 +718,8 @@ void Context::initializeVulkan(const Description &desc)
 
     // semaphores
 
-    swapchain_image_available_semaphores_ = createSemaphores(image_count_);
-    swapchain_present_semaphores_         = createSemaphores(image_count_);
+    swapchain_image_available_semaphores_ = createBinarySemaphores(image_count_);
+    swapchain_present_semaphores_         = createBinarySemaphores(image_count_);
     
     // resource allocator
 
@@ -845,17 +838,14 @@ void Context::createSwapchain()
     };
 
     swapchain_ = device_.createSwapchainKHRUnique(swapchain_create_info);
-    swapchain_image_desc_ = ImageDescription{
-        .device       = device_,
+    swapchain_image_desc_ = Image::Description{
         .type         = vk::ImageType::e2D,
         .format       = format.format,
         .samples      = vk::SampleCountFlagBits::e1,
         .extent       = { extent.width, extent.height, 1 },
         .sharing_mode = queue_sharing_mode,
         .mip_levels   = 1,
-        .array_layers = 1,
-        .allocation   = nullptr,
-        .allocator    = nullptr
+        .array_layers = 1
     };
 
     // get swapchain images
@@ -871,20 +861,41 @@ void Context::createSwapchain()
         &swapchain_image_count, swapchain_images.data());
     
     for(auto i : swapchain_images)
-        swapchain_images_.push_back(Image(i, swapchain_image_desc_));
+    {
+        auto impl = std::make_shared<Image::Impl>();
+        impl->device      = device_;
+        impl->image       = i;
+        impl->description = swapchain_image_desc_;
+
+        impl->initializeStateIndices();
+        impl->state    = std::make_unique<Image::State[]>(1);
+        impl->state[0] = FreeState{ .layout = vk::ImageLayout::eUndefined };
+
+        Image image;
+        image.impl_ = std::move(impl);
+        swapchain_images_.push_back(image);
+    }
 
     // create image views
 
     for(auto &image : swapchain_images_)
     {
         swapchain_image_views_.push_back(
-            image.createView(vk::ImageViewType::e2D, {
-                .aspectMask     = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel   = 0,
-                .levelCount     = 1,
-                .baseArrayLayer = 0,
-                .layerCount     = 1
-            }));
+            image.createView(
+                vk::ImageViewType::e2D,
+                vk::ImageSubresourceRange{
+                    .aspectMask     = vk::ImageAspectFlagBits::eColor,
+                    .baseMipLevel   = 0,
+                    .levelCount     = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount     = 1
+                },
+                vk::ComponentMapping{
+                    .r = vk::ComponentSwizzle::eIdentity,
+                    .g = vk::ComponentSwizzle::eIdentity,
+                    .b = vk::ComponentSwizzle::eIdentity,
+                    .a = vk::ComponentSwizzle::eIdentity,
+                }));
     }
 }
 

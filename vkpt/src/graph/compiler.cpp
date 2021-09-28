@@ -1,114 +1,431 @@
-#include <queue>
+#include <iostream>
+#include <ranges>
 
 #include <vkpt/graph/compiler.h>
+#include <vkpt/graph/group_barrier_generator.h>
+#include <vkpt/graph/group_barrier_optimizer.h>
+#include <vkpt/graph/semaphore_signal_handler.h>
+#include <vkpt/graph/semaphore_wait_handler.h>
 
-VKPT_RENDER_GRAPH_BEGIN
+VKPT_GRAPH_BEGIN
 
 Compiler::Compiler()
-    : object_arena_(memory_arena_),
-      compile_passes_(&memory_arena_),
-      buffer_states_(&memory_arena_),
-      image_states_(&memory_arena_)
+    : compile_passes_(&memory_),
+      sorted_compile_passes_(&memory_),
+      compile_groups_(&memory_),
+      closure_(nullptr),
+      generated_pre_passes_(&memory_),
+      generated_post_passes_(&memory_),
+      resource_records_(memory_),
+      buffer_final_states_(&memory_),
+      image_final_states_(&memory_)
 {
-    
-}
 
-ExecutableGraph Compiler::compile(
-    std::pmr::memory_resource &memory,
-    SemaphoreAllocator        &semaphore_allocator,
-    Graph                     &graph)
-{
-    /* 1. 构建pass间的完整依赖关系
-       2. 在基本拓扑序的约束下对pass进行排序，排序以“同queue中pass最近依赖最少”为原则
-       3. 如何确定semaphore？
-       4. 按拓扑序遍历所有pass，构建每个resource的历史踪迹 
-       5. 对每个pass中的每个资源使用
-            a. 若上一个使用者在同一个queue，那么：
-                (1) 对buffer，看看和上一个pass之间有没有合适的global memory barrier，没有的话就插入一个
-                (2) 对image，直接插个barrier
-            b. 上一个使用者在另一个queue，那么：
-                (1) 找到最近的、通往该queue的semaphore
-                (2) 在上一个pass末尾插入一个release barrier
-                (3) 在这个pass开头插入一个acquire barrier
-                (4) 给semaphore的signal stages加入上个pass的stages
-                (5) 给semaphore的wait stages加入这个pass的stages
-    */
-
-    /*
-        需要把pass分成多组，组内pass都属于同一个queue，且从任意一个组出发均不能到达自己
-
-        为此，在原DAG的基础上构建grouping graph，其每个连通分量被划分到同一个组中
-
-        将queue q的pass A记作Aq
-
-        我们在原图基础上删除一些边来得到grouping graph
-        0. 令G = 原图
-        1. 删除G中所有的Ax -> By
-        2. 若原图中存在Ax -> By，记G中所有从B可达的pass集合为R[B]，删除R[B]与V[G]/R[B]间的所有边
-        3. 若原图中存在Ax -> By，记G中所有从A反向可达的pass集合为T[A]，删除T[A]与V[G]/T[A]间的所有边
-    */
-
-    compile_passes_.resize(graph.passes_.size());
-    auto pass_it = graph.passes_.begin();
-    for(auto &compile_pass : compile_passes_)
-    {
-        compile_pass = object_arena_.create<CompilePass>(memory_arena_);
-        compile_pass->raw_pass = *pass_it++;
-    }
-
-    generateGroups();
-
-    fillGroupArcs();
-
-    generateGroupFlags();
-
-    sortGroups();
-
-    sortPasses();
-
-    fillInterGroupSemaphores(semaphore_allocator);
-
-    fillResourceStateTracers();
-
-    generateBarriers();
-
-    ExecutableGraph result;
-    result.groups = Vector<ExecutableGroup>(compile_groups_.size(), &memory);
-    for(size_t i = 0; i < compile_groups_.size(); ++i)
-        fillExecutableGroup(memory, result.groups[i], *compile_groups_[i]);
-
-    return result;
 }
 
 ExecutableGraph Compiler::compile(
     SemaphoreAllocator &semaphore_allocator,
-    Graph              &graph)
+    const Graph        &graph)
 {
-    return compile(memory_arena_, semaphore_allocator, graph);
+    initializeCompilePasses(graph);
+    topologySortCompilePasses();
+    
+    buildTransitiveClosure();
+
+    collectResourceUsages();
+
+    {
+        auto create_pre_pass = [&]
+        {
+            auto pass = arena_.create<CompilePass>(memory_);
+            generated_pre_passes_.push_back(pass);
+            return pass;
+        };
+
+        SemaphoreWaitHandler semaphore_wait_handler(
+            memory_, this, closure_, create_pre_pass);
+
+        semaphore_wait_handler.collectWaitingSemaphores(graph);
+        semaphore_wait_handler.processWaitingSemaphores(resource_records_);
+    }
+
+    {
+        auto create_post_pass = [&]
+        {
+            auto pass = arena_.create<CompilePass>(memory_);
+            generated_post_passes_.push_back(pass);
+            return pass;
+        };
+
+        SemaphoreSignalHandler semaphore_signal_handler(
+            memory_, closure_,
+            buffer_final_states_, image_final_states_,
+            create_post_pass);
+
+        semaphore_signal_handler.collectSignalingSemaphores(graph);
+        semaphore_signal_handler.processSignalingSemaphores(
+            resource_records_, graph);
+    }
+
+    for(auto &[buffer, _] : resource_records_.getBuffers())
+        processUnwaitedFirstUsage(buffer);
+
+    for(auto &[image_subrsc, _] : resource_records_.getImages())
+        processUnwaitedFirstUsage(image_subrsc);
+
+    for(auto &[buffer, _] : resource_records_.getBuffers())
+        processUnsignaledFinalState(buffer);
+
+    for(auto &[image_subrsc, _] : resource_records_.getImages())
+        processUnsignaledFinalState(image_subrsc);
+
+    mergeGeneratedPreAndPostPasses();
+
+    {
+        generateGroupFlags();
+        auto unsorted_groups = generateGroups();
+        fillInterGroupArcs(unsorted_groups);
+        topologySortGroups(unsorted_groups);
+    }
+
+    for(auto group : compile_groups_)
+        topologySortPassesInGroup(group);
+
+    fillInterGroupSemaphores(semaphore_allocator);
+
+    for(auto &record : std::views::values(resource_records_.getBuffers()))
+        buildPassToUsage(record);
+
+    for(auto &record : std::views::values(resource_records_.getImages()))
+        buildPassToUsage(record);
+
+    {
+        GroupBarrierGenerator group_barrier_generator(memory_, resource_records_);
+        for(auto group : compile_groups_)
+            group_barrier_generator.fillBarriers(group);
+    }
+
+    GroupBarrierOptimizer group_barrier_optimizer;
+    for(auto group : compile_groups_)
+        group_barrier_optimizer.optimize(group);
+
+    ExecutableGraph result(memory_);
+    result.groups.resize(compile_groups_.size(), ExecutableGroup(memory_));
+
+    for(size_t i = 0; i < compile_groups_.size(); ++i)
+        fillExecutableGroup(*compile_groups_[i], result.groups[i]);
+
+    result.buffer_final_states = std::move(buffer_final_states_);
+    result.image_final_states  = std::move(image_final_states_);
+
+    return result;
 }
 
-Compiler::CompilePass::CompilePass(std::pmr::memory_resource &memory)
-    : pre_memory_barriers(&memory),
-      pre_buffer_barriers(&memory),
-      pre_image_barriers(&memory),
-      post_memory_barriers(&memory),
-      post_buffer_barriers(&memory),
-      post_image_barriers(&memory)
+void Compiler::setMessenger(std::function<void(const std::string &)> func)
 {
-    
+    if(func)
+        msg_ = func;
+    else
+        msg_ = [](const std::string &) {};
 }
 
-Compiler::CompileGroup::CompileGroup(std::pmr::memory_resource &memory)
-    : passes(&memory), heads(&memory), tails(&memory)
+void Compiler::initializeCompilePasses(const Graph &graph)
 {
-    
+    Vector<CompilePass *> raw_to_compile(&memory_);
+    raw_to_compile.reserve(graph.passes_.size());
+
+    // create compile passes
+
+    for(auto raw_pass : graph.passes_)
+    {
+        assert(raw_pass->index_ == static_cast<int>(raw_to_compile.size()));
+
+        auto compile_pass = arena_.create<CompilePass>(memory_);
+
+        compile_pass->raw_pass = raw_pass;
+        compile_pass->queue    = raw_pass->queue_;
+
+        compile_passes_.insert(compile_pass);
+        raw_to_compile.push_back(compile_pass);
+
+    }
+
+    // copy heads/tails
+
+    for(auto compile_pass : compile_passes_)
+    {
+        for(auto tail : compile_pass->raw_pass->tails_)
+        {
+            auto compile_tail = raw_to_compile[tail->index_];
+            compile_pass->tails.insert(compile_tail);
+            compile_tail->heads.insert(compile_pass);
+        }
+    }
+}
+
+void Compiler::topologySortCompilePasses()
+{
+    PmrQueue<CompilePass *> next_passes(&memory_);
+
+    for(auto pass : compile_passes_)
+    {
+        pass->unprocessed_head_count =
+            static_cast<uint32_t>(pass->heads.size());
+        if(!pass->unprocessed_head_count)
+            next_passes.push(pass);
+    }
+
+    sorted_compile_passes_.clear();
+    sorted_compile_passes_.reserve(compile_passes_.size());
+
+    while(!next_passes.empty())
+    {
+        auto pass = next_passes.front();
+        next_passes.pop();
+
+        assert(!pass->unprocessed_head_count);
+        sorted_compile_passes_.push_back(pass);
+
+        for(auto tail : pass->tails)
+        {
+            if(!--tail->unprocessed_head_count)
+                next_passes.push(tail);
+        }
+    }
+
+    assert(sorted_compile_passes_.size() == compile_passes_.size());
+    for(size_t i = 0; i < sorted_compile_passes_.size(); ++i)
+        sorted_compile_passes_[i]->sorted_index = static_cast<int>(i);
+}
+
+void Compiler::buildTransitiveClosure()
+{
+    closure_ = arena_.create<DAGTransitiveClosure>(
+        static_cast<int>(compile_passes_.size()), memory_);
+
+    for(auto pass : compile_passes_)
+    {
+        for(auto tail : pass->tails)
+            closure_->addArc(pass->sorted_index, tail->sorted_index);
+    }
+
+    closure_->computeClosure();
+}
+
+void Compiler::collectResourceUsages()
+{
+    resource_records_.build(sorted_compile_passes_);
+
+#ifdef VKPT_DEBUG
+
+    for(auto &[buffer, record] : resource_records_.getBuffers())
+    {
+        for(auto it = std::next(record.usages.begin());
+            it != record.usages.end(); ++it)
+        {
+            auto prev = std::prev(it);
+            if(!closure_->isReachable(
+                prev->pass->sorted_index, it->pass->sorted_index))
+            {
+                fatal(
+                    "users of buffer {} are not ordered", buffer.getName());
+            }
+        }
+    }
+
+    for(auto &[image_subrsc, record] : resource_records_.getImages())
+    {
+        for(auto it = std::next(record.usages.begin());
+            it != record.usages.end(); ++it)
+        {
+            auto prev = std::prev(it);
+            if(!closure_->isReachable(
+                prev->pass->sorted_index, it->pass->sorted_index))
+            {
+                fatal(
+                    "users of image {} are not ordered",
+                    image_subrsc.image.getName());
+            }
+        }
+    }
+
+#endif
+}
+
+template<typename Rsc>
+void Compiler::processUnwaitedFirstUsage(const Rsc &resource)
+{
+    constexpr bool is_buffer = std::is_same_v<Rsc, Buffer>;
+
+    auto &record = resource_records_.getRecord(resource);
+    if(record.has_wait_semaphore)
+        return;
+
+    assert(!record.usages.empty());
+    auto &first_usage = record.usages.front();
+    CompilePass *first_pass = first_usage.pass;
+
+    const ResourceState &state = resource.getState();
+    state.match(
+        [&](const FreeState &)
+    {
+
+    },
+        [&](const UsingState &s)
+    {
+        if(s.queue == first_usage.pass->queue)
+        {
+            if constexpr(is_buffer)
+            {
+                first_pass->pre_ext_buffer_barriers.insert(
+                    vk::BufferMemoryBarrier2KHR{
+                        .srcStageMask        = s.stages,
+                        .srcAccessMask       = s.access,
+                        .dstStageMask        = first_usage.stages,
+                        .dstAccessMask       = first_usage.access,
+                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .buffer              = resource.get(),
+                        .offset              = 0,
+                        .size                = VK_WHOLE_SIZE
+                    });
+            }
+            else
+            {
+                first_pass->pre_ext_image_barriers.insert(
+                    vk::ImageMemoryBarrier2KHR{
+                        .srcStageMask        = s.stages,
+                        .srcAccessMask       = s.access,
+                        .dstStageMask        = first_usage.stages,
+                        .dstAccessMask       = first_usage.access,
+                        .oldLayout           = s.layout,
+                        .newLayout           = first_usage.layout,
+                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .image               = resource.get(),
+                        .subresourceRange    = subrscToRange(resource.subrsc)
+                    });
+            }
+        }
+        else
+        {
+            auto dummy_pass = arena_.create<CompilePass>(memory_);
+            dummy_pass->queue = s.queue;
+            generated_pre_passes_.push_back(dummy_pass);
+
+            dummy_pass->tails.insert(first_pass);
+            first_pass->heads.insert(dummy_pass);
+
+            if constexpr(is_buffer)
+            {
+                record.usages.push_front(CompileBufferUsage{
+                    .pass       = dummy_pass,
+                    .stages     = s.stages,
+                    .access     = s.access,
+                    .end_stages = s.stages,
+                    .end_access = s.access
+                });
+                dummy_pass->generated_buffer_usages_[resource] =
+                    record.usages.front();
+            }
+            else
+            {
+                record.usages.push_front(CompileImageUsage{
+                    .pass       = dummy_pass,
+                    .stages     = s.stages,
+                    .access     = s.access,
+                    .layout     = s.layout,
+                    .end_stages = s.stages,
+                    .end_access = s.access,
+                    .end_layout = s.layout
+                });
+                dummy_pass->generated_image_usages_[resource] =
+                    record.usages.front();
+            }
+        }
+    },
+        [&](const ReleasedState &s)
+    {
+        fatal(
+            "{} {} is in released state but doesn't have a waiting semaphore",
+            is_buffer ? "buffer" : "image", resource.getName());
+    });
+}
+
+template<typename Rsc>
+void Compiler::processUnsignaledFinalState(const Rsc &rsc)
+{
+    constexpr bool is_buffer = std::is_same_v<Rsc, Buffer>;
+
+    auto &record = resource_records_.getRecord(rsc);
+    if(record.has_signal_semaphore)
+        return;
+
+    assert(!record.usages.empty());
+    auto &last_usage = record.usages.back();
+
+    if constexpr(is_buffer)
+    {
+        buffer_final_states_[rsc] = UsingState{
+            .queue  = last_usage.pass->queue,
+            .stages = last_usage.end_stages,
+            .access = last_usage.end_access
+        };
+    }
+    else
+    {
+        image_final_states_[rsc] = UsingState{
+            .queue  = last_usage.pass->queue,
+            .stages = last_usage.end_stages,
+            .access = last_usage.end_access,
+            .layout = last_usage.end_layout
+        };
+    }
+}
+
+void Compiler::mergeGeneratedPreAndPostPasses()
+{
+    std::copy(
+        generated_pre_passes_.begin(),
+        generated_pre_passes_.end(),
+        agz::misc::direct_inserter(compile_passes_));
+
+    std::copy(
+        generated_post_passes_.begin(),
+        generated_post_passes_.end(),
+        agz::misc::direct_inserter(compile_passes_));
+
+    Vector<CompilePass *> new_sorted_compile_passes(&memory_);
+    new_sorted_compile_passes.reserve(
+        generated_pre_passes_.size() +
+        sorted_compile_passes_.size() +
+        generated_post_passes_.size());
+
+    std::copy(
+        generated_pre_passes_.begin(),
+        generated_pre_passes_.end(),
+        std::back_inserter(new_sorted_compile_passes));
+
+    std::copy(
+        sorted_compile_passes_.begin(),
+        sorted_compile_passes_.end(),
+        std::back_inserter(new_sorted_compile_passes));
+
+    std::copy(
+        generated_post_passes_.begin(),
+        generated_post_passes_.end(),
+        std::back_inserter(new_sorted_compile_passes));
+
+    sorted_compile_passes_ = std::move(new_sorted_compile_passes);
+    for(size_t i = 0; i < sorted_compile_passes_.size(); ++i)
+        sorted_compile_passes_[i]->sorted_index = static_cast<int>(i);
 }
 
 template<bool Reverse>
-void Compiler::newGroupFlag(CompilePass *compile_entry, size_t bit_index)
+void Compiler::addGroupFlag(CompilePass *entry, size_t bit_index)
 {
-    PmrQueue<CompilePass *> next_passes(&memory_arena_);
-    next_passes.push(compile_entry);
+    PmrQueue<CompilePass *> next_passes(&memory_);
+    next_passes.push(entry);
 
     while(!next_passes.empty())
     {
@@ -117,16 +434,13 @@ void Compiler::newGroupFlag(CompilePass *compile_entry, size_t bit_index)
         if(pass->group_flags.test(bit_index))
             continue;
 
-        auto raw_pass = pass->raw_pass;
-        auto &succs = Reverse ? raw_pass->heads_ : raw_pass->tails_;
+        auto &succs = Reverse ? pass->heads : pass->tails;
         for(auto succ : succs)
         {
-            if(succ->queue_ != pass->raw_pass->queue_)
+            if(succ->queue != pass->queue)
                 continue;
-
-            auto compile_succ = compile_passes_[succ->index_];
-            if(compile_succ->group_flags == pass->group_flags)
-                next_passes.push(compile_succ);
+            if(succ->group_flags == pass->group_flags)
+                next_passes.push(succ);
         }
 
         pass->group_flags.set(bit_index, true);
@@ -135,37 +449,48 @@ void Compiler::newGroupFlag(CompilePass *compile_entry, size_t bit_index)
 
 void Compiler::generateGroupFlags()
 {
-    size_t next_flag_index = 0;
-    for(auto compile_pass : compile_passes_)
-    {
-        for(auto tail : compile_pass->raw_pass->tails_)
-        {
-            auto compile_tail = compile_passes_[tail->index_];
-            newGroupFlag<false>(compile_tail, next_flag_index++);
-            newGroupFlag<true>(compile_pass, next_flag_index++);
-        }
+    Set<CompilePass *> entry_passes(&memory_), reverse_entry_passes(&memory_);
 
-        if(!compile_pass->raw_pass->wait_semaphores_.empty())
-            newGroupFlag<true>(compile_pass, next_flag_index++);
+    for(auto pass : sorted_compile_passes_)
+    {
+        bool reverse = !pass->signal_semaphores.empty();
+        for(auto tail : pass->tails)
+        {
+            if(pass->queue != tail->queue)
+            {
+                entry_passes.insert(tail);
+                reverse = true;
+            }
+        }
+        if(!pass->wait_semaphores.empty())
+            entry_passes.insert(pass);
+        if(reverse)
+            reverse_entry_passes.insert(pass);
     }
+
+    size_t bit_index = 0;
+    for(auto p : entry_passes)
+        addGroupFlag<false>(p, bit_index++);
+    for(auto p : reverse_entry_passes)
+        addGroupFlag<true>(p, bit_index++);
 }
 
-void Compiler::generateGroups()
+List<CompileGroup *> Compiler::generateGroups()
 {
-    std::pmr::unsynchronized_pool_resource pass_queue_pool;
-    PmrQueue<CompilePass *> next_passes(&pass_queue_pool);
+    List<CompileGroup *> result(&memory_);
+    PmrQueue<CompilePass *> next_passes(&memory_);
 
-    for(auto entry : compile_passes_)
+    for(auto entry : sorted_compile_passes_)
     {
         if(entry->group)
             continue;
 
+        auto new_group = arena_.create<CompileGroup>(memory_);
+        new_group->queue = entry->queue;
+        result.push_back(new_group);
+
         assert(next_passes.empty());
         next_passes.push(entry);
-
-        auto new_group = object_arena_.create<CompileGroup>(memory_arena_);
-        compile_groups_.push_back(new_group);
-
         while(!next_passes.empty())
         {
             auto pass = next_passes.front();
@@ -176,62 +501,56 @@ void Compiler::generateGroups()
             pass->group = new_group;
             new_group->passes.push_back(pass);
 
-            for(auto head : pass->raw_pass->heads_)
+            for(auto head : pass->heads)
             {
-                auto compile_head = compile_passes_[head->index_];
-
-                if(!compile_head->group &&
-                    head->queue_ == pass->raw_pass->queue_ &&
-                    compile_head->group_flags == pass->group_flags)
-                    next_passes.push(compile_head);
+                if(!head->group &&
+                    head->queue == pass->queue &&
+                    head->group_flags == pass->group_flags)
+                    next_passes.push(head);
             }
 
-            for(auto tail : pass->raw_pass->tails_)
+            for(auto tail : pass->tails)
             {
-                auto compile_tail = compile_passes_[tail->index_];
-
-                if(!compile_tail->group &&
-                    tail->queue_ == pass->raw_pass->queue_ &&
-                    compile_tail->group_flags == pass->group_flags)
-                    next_passes.push(compile_tail);
+                if(!tail->group &&
+                    tail->queue == pass->queue &&
+                    tail->group_flags == pass->group_flags)
+                    next_passes.push(tail);
             }
         }
     }
+
+    return result;
 }
 
-void Compiler::fillGroupArcs()
+void Compiler::fillInterGroupArcs(const List<CompileGroup *> &groups)
 {
-    for(auto group : compile_groups_)
+    for(auto group : groups)
     {
         for(auto pass : group->passes)
         {
-            for(auto tail : pass->raw_pass->tails_)
+            for(auto tail : pass->tails)
             {
-                if(tail->queue_ == pass->raw_pass->queue_)
+                if(tail->queue == pass->queue)
                     continue;
 
-                auto tail_group = compile_passes_[tail->index_]->group;
-                assert(group->tails.contains(tail_group) ==
-                       tail_group->heads.contains(group));
-                if(group->tails.contains(tail_group))
+                if(tail->group->heads.contains(pass->group))
                     continue;
-
-                auto dep = object_arena_.create<CompileGroup::GroupDependency>();
-                group->tails.insert({ tail_group, dep });
-                tail_group->heads.insert({ group, dep });
+                
+                pass->group->need_tail_semaphore = true;
+                pass->group->tails.insert(tail->group);
+                tail->group->heads.insert({ pass->group, {} });
             }
         }
     }
 }
 
-void Compiler::sortGroups()
+void Compiler::topologySortGroups(const List<CompileGroup *> &groups)
 {
-    Vector<CompileGroup *> sorted_groups(&memory_arena_);
-    sorted_groups.reserve(compile_groups_.size());
-    
-    PmrQueue<CompileGroup *> next_groups(&memory_arena_);
+    assert(compile_groups_.empty());
+    compile_groups_.reserve(groups.size());
 
-    for(auto group : compile_groups_)
+    PmrQueue<CompileGroup *> next_groups(&memory_);
+    for(auto group : groups)
     {
         group->unprocessed_head_count = static_cast<int>(group->heads.size());
         if(!group->unprocessed_head_count)
@@ -244,489 +563,173 @@ void Compiler::sortGroups()
         next_groups.pop();
         assert(!group->unprocessed_head_count);
 
-        sorted_groups.push_back(group);
+        compile_groups_.push_back(group);
         for(auto &tail : group->tails)
         {
-            if(!--tail.first->unprocessed_head_count)
-                next_groups.push(tail.first);
+            if(!--tail->unprocessed_head_count)
+                next_groups.push(tail);
         }
     }
 
-    assert(sorted_groups.size() == compile_groups_.size());
-    compile_groups_ = std::move(sorted_groups);
+    assert(compile_groups_.size() == groups.size());
 }
 
-void Compiler::sortPasses()
+void Compiler::topologySortPassesInGroup(CompileGroup *group)
 {
-    PmrQueue<CompilePass *> next_passes(&memory_arena_);
-
-    auto is_in_same_group = [&](CompilePass *pass1, Pass *pass2)
+    PmrQueue<CompilePass *> next_passes(&memory_);
+    for(auto pass : group->passes)
     {
-        return pass1->group == compile_passes_[pass2->index_]->group;
-    };
+        int head_count = 0;
+        for(auto head : pass->heads)
+            head_count += head->group == group;
+        pass->unprocessed_head_count = head_count;
 
-    for(auto group : compile_groups_)
-    {
-        assert(next_passes.empty());
-        for(auto pass : group->passes)
-        {
-            pass->unprocessed_head_count = 0;
-            for(auto head : pass->raw_pass->heads_)
-            {
-                if(is_in_same_group(pass, head))
-                    ++pass->unprocessed_head_count;
-            }
-            if(!pass->unprocessed_head_count)
-                next_passes.push(pass);
-        }
-
-        Vector<CompilePass *> sorted_passes(&memory_arena_);
-        sorted_passes.reserve(group->passes.size());
-
-        while(!next_passes.empty())
-        {
-            auto pass = next_passes.front();
-            next_passes.pop();
-            assert(!pass->unprocessed_head_count);
-
-            sorted_passes.push_back(pass);
-            for(auto tail : pass->raw_pass->tails_)
-            {
-                if(is_in_same_group(pass, tail))
-                {
-                    auto compile_tail = compile_passes_[tail->index_];
-                    if(!--compile_tail->unprocessed_head_count)
-                        next_passes.push(compile_tail);
-                }
-            }
-        }
-
-        assert(sorted_passes.size() == group->passes.size());
-        group->passes.swap(sorted_passes);
+        if(!head_count)
+            next_passes.push(pass);
     }
+
+    Vector<CompilePass *> sorted_passes(&memory_);
+    sorted_passes.reserve(group->passes.size());
+
+    while(!next_passes.empty())
+    {
+        auto pass = next_passes.front();
+        next_passes.pop();
+
+        assert(!pass->unprocessed_head_count);
+        sorted_passes.push_back(pass);
+
+        for(auto tail : pass->tails)
+        {
+            if(tail->group == group && !--tail->unprocessed_head_count)
+                next_passes.push(tail);
+        }
+    }
+
+    for(size_t i = 0; i < sorted_passes.size(); ++i)
+        sorted_passes[i]->sorted_index_in_group = static_cast<int>(i);
+
+    assert(sorted_passes.size() == group->passes.size());
+    group->passes.swap(sorted_passes);
 }
 
-void Compiler::fillInterGroupSemaphores(SemaphoreAllocator &semaphore_allocator)
+void Compiler::fillInterGroupSemaphores(SemaphoreAllocator &allocator)
 {
     for(auto group : compile_groups_)
     {
-        for(auto &pair : group->tails)
-            pair.second->semaphore = semaphore_allocator.newSemaphore();
-    }
-}
-
-void Compiler::fillResourceStateTracers()
-{
-    auto buffer_tracer = [&](vk::Buffer buffer) -> BufferStateTracer&
-    {
-        return buffer_states_.try_emplace(
-            buffer, AGZ_LAZY(BufferStateTracer(memory_arena_))).first->second;
-    };
-
-    auto image_tracer = [&](vk::Image image, const vk::ImageSubresource &subrsc)
-        -> ImageStateTracer&
-    {
-        return image_states_.try_emplace(
-            { image, subrsc },
-            AGZ_LAZY(ImageStateTracer(memory_arena_))).first->second;
-    };
-    
-    for(auto group : compile_groups_)
-    {
-        for(auto pass : group->passes)
+        if(group->need_tail_semaphore)
         {
-            for(auto &[buffer, usage] : pass->raw_pass->buffer_usages_)
-            {
-                buffer_tracer(buffer).addUsage(pass->raw_pass, usage);
-            }
-
-            for(auto &[image_key, usage] : pass->raw_pass->image_usages_)
-            {
-                for_each_subrsc(image_key.second, [&](const vk::ImageSubresource &subrsc)
-                {
-                    auto &tracer = image_tracer(image_key.first.get(), subrsc);
-                    tracer.addUsage(pass->raw_pass, usage);
-                });
-            }
+            group->tail_semaphore = allocator.newTimelineSemaphore();
+            group->tail_semaphore.nextSignalValue();
         }
     }
 }
 
-Compiler::CompileGroup::GroupDependency *Compiler::findHeadDependency(
-    CompileGroup *src, CompileGroup *dst) const
+void Compiler::buildPassToUsage(CompileBuffer &record)
 {
-    for(auto &pair : src->heads)
-    {
-        if(pair.first == dst)
-            return pair.second;
-        if(auto result = findHeadDependency(pair.first, dst))
-            return result;
-    }
-    return nullptr;
+    assert(record.pass_to_usage.empty());
+    for(auto it = record.usages.begin(); it != record.usages.end(); ++it)
+        record.pass_to_usage.insert({ it->pass, it });
 }
 
-void Compiler::processBufferDependency(
-    Pass                    *pass,
-    const Buffer            &buffer,
-    const Pass::BufferUsage &usage)
+void Compiler::buildPassToUsage(CompileImage &record)
 {
-    auto &state_tracer = buffer_states_.at(buffer);
-    if(state_tracer.isInitialUsage(pass))
-        return;
-
-    auto &last_usage = state_tracer.getLastUsage(pass);
-    auto last_pass = last_usage.pass;
-
-    auto compile_pass      = compile_passes_[pass->index_];
-    auto last_compile_pass = compile_passes_[last_pass->index_];
-
-    if(last_pass->queue_ == pass->queue_)
-    {
-        // IMPTOVE: remove redundant barrier
-        compile_pass->pre_memory_barriers.insert(
-            vk::MemoryBarrier2KHR{
-                .srcStageMask  = last_usage.stages,
-                .srcAccessMask = last_usage.access,
-                .dstStageMask  = usage.stages,
-                .dstAccessMask = usage.access
-            });
-    }
-    else
-    {
-        auto dependency = findHeadDependency(
-            compile_pass->group, last_compile_pass->group);
-
-        //dependency->signal_stages |= last_usage.stages;
-        dependency->wait_stages |= usage.stages;
-
-        const uint32_t last_family = last_pass->queue_->getFamilyIndex();
-        const uint32_t this_family = pass->queue_->getFamilyIndex();
-
-        const bool is_different_queue_family = last_family != this_family;
-        const bool is_exclusive =
-            buffer.getDescription().sharing_mode == vk::SharingMode::eExclusive;
-
-        if(is_different_queue_family && is_exclusive)
-        {
-            last_compile_pass->post_buffer_barriers.insert(
-                vk::BufferMemoryBarrier2KHR{
-                    .srcStageMask        = last_usage.stages,
-                    .srcAccessMask       = last_usage.access,
-                    //.dstStageMask        = usage.stages,
-                    //.dstAccessMask       = usage.access,
-                    .srcQueueFamilyIndex = last_family,
-                    .dstQueueFamilyIndex = this_family,
-                    .buffer              = buffer.get(),
-                    .offset              = 0,
-                    .size                = VK_WHOLE_SIZE
-                });
-            compile_pass->pre_buffer_barriers.insert(
-                vk::BufferMemoryBarrier2KHR{
-                    .srcStageMask        = usage.stages,
-                    //.srcStageMask        = last_usage.stages,
-                    //.srcAccessMask       = last_usage.access,
-                    .dstStageMask        = usage.stages,
-                    //.dstAccessMask       = usage.access,
-                    .srcQueueFamilyIndex = last_family,
-                    .dstQueueFamilyIndex = this_family,
-                    .buffer              = buffer.get(),
-                    .offset              = 0,
-                    .size                = VK_WHOLE_SIZE
-                });
-        }
-        else
-        {
-            compile_pass->pre_memory_barriers.insert(
-                vk::MemoryBarrier2KHR{
-                    .srcStageMask  = usage.stages,
-                    //.srcAccessMask = last_usage.access,
-                    .dstStageMask  = usage.stages,
-                    .dstAccessMask = usage.access
-                });
-        }
-    }
-}
-
-void Compiler::processImageDependency(
-    Pass                       *pass,
-    const Image                &image,
-    const vk::ImageSubresource &subrsc,
-    const Pass::ImageUsage     &usage)
-{
-    auto &state_tracer = image_states_.at({ image.get(), subrsc });
-    if(state_tracer.isInitialUsage(pass))
-        return;
-
-    auto &last_usage = state_tracer.getLastUsage(pass);
-    auto last_pass = last_usage.pass;
-
-    auto compile_pass = compile_passes_[pass->index_];
-    auto last_compile_pass = compile_passes_[last_pass->index_];
-
-    if(last_pass->queue_ == pass->queue_)
-    {
-        compile_pass->pre_image_barriers.insert(
-            vk::ImageMemoryBarrier2KHR{
-                .srcStageMask        = last_usage.stages,
-                .srcAccessMask       = last_usage.access,
-                .dstStageMask        = usage.stages,
-                .dstAccessMask       = usage.access,
-                .oldLayout           = last_usage.layout,
-                .newLayout           = usage.layout,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image               = image.get(),
-                .subresourceRange    = vk::ImageSubresourceRange{
-                    .aspectMask     = subrsc.aspectMask,
-                    .baseMipLevel   = subrsc.mipLevel,
-                    .levelCount     = 1,
-                    .baseArrayLayer = subrsc.arrayLayer,
-                    .layerCount     = 1
-                }
-            });
-    }
-    else
-    {
-        auto dependency = findHeadDependency(
-            compile_pass->group, last_compile_pass->group);
-
-        //dependency->signal_stages |= last_usage.stages;
-        dependency->wait_stages |= usage.stages;
-
-        const uint32_t last_family = last_pass->queue_->getFamilyIndex();
-        const uint32_t this_family = pass->queue_->getFamilyIndex();
-
-        const bool is_different_queue_family = last_family != this_family;
-        const bool is_exclusive =
-            image.getDescription().sharing_mode == vk::SharingMode::eExclusive;
-
-        if(is_different_queue_family && is_exclusive)
-        {
-            last_compile_pass->post_image_barriers.insert(
-                vk::ImageMemoryBarrier2KHR{
-                    .srcStageMask        = last_usage.stages,
-                    .srcAccessMask       = last_usage.access,
-                    .oldLayout           = last_usage.layout,
-                    .newLayout           = usage.layout,
-                    .srcQueueFamilyIndex = last_family,
-                    .dstQueueFamilyIndex = this_family,
-                    .image               = image.get(),
-                    .subresourceRange    = vk::ImageSubresourceRange{
-                        .aspectMask     = subrsc.aspectMask,
-                        .baseMipLevel   = subrsc.mipLevel,
-                        .levelCount     = 1,
-                        .baseArrayLayer = subrsc.arrayLayer,
-                        .layerCount     = 1
-                    }
-                });
-            
-            compile_pass->pre_image_barriers.insert(
-                vk::ImageMemoryBarrier2KHR{
-                    .dstStageMask        = usage.stages,
-                    .dstAccessMask       = usage.access,
-                    .oldLayout           = last_usage.layout,
-                    .newLayout           = usage.layout,
-                    .srcQueueFamilyIndex = last_family,
-                    .dstQueueFamilyIndex = this_family,
-                    .image               = image.get(),
-                    .subresourceRange    = vk::ImageSubresourceRange{
-                        .aspectMask     = subrsc.aspectMask,
-                        .baseMipLevel   = subrsc.mipLevel,
-                        .levelCount     = 1,
-                        .baseArrayLayer = subrsc.arrayLayer,
-                        .layerCount     = 1
-                    }
-                });
-        }
-        else
-        {
-            compile_pass->pre_image_barriers.insert(
-                vk::ImageMemoryBarrier2KHR{
-                    .srcStageMask        = usage.stages,
-                    .dstStageMask        = usage.stages,
-                    .dstAccessMask       = usage.access,
-                    .oldLayout           = last_usage.layout,
-                    .newLayout           = usage.layout,
-                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .image               = image.get(),
-                    .subresourceRange    = vk::ImageSubresourceRange{
-                        .aspectMask     = subrsc.aspectMask,
-                        .baseMipLevel   = subrsc.mipLevel,
-                        .levelCount     = 1,
-                        .baseArrayLayer = subrsc.arrayLayer,
-                        .layerCount     = 1
-                    }
-                });
-        }
-    }
-}
-
-void Compiler::generateBarriers()
-{
-    for(auto group : compile_groups_)
-    {
-        for(auto pass : group->passes)
-        {
-            for(auto &[buffer, usage] : pass->raw_pass->buffer_usages_)
-                processBufferDependency(pass->raw_pass, buffer, usage);
-
-            for(auto &[image_key, usage] : pass->raw_pass->image_usages_)
-            {
-                auto &image = image_key.first;
-                auto &range = image_key.second;
-
-                for_each_subrsc(range, [&](const vk::ImageSubresource &subrsc)
-                {
-                    processImageDependency(
-                        pass->raw_pass, image, subrsc, usage);
-                });
-            }
-
-            std::copy(
-                pass->raw_pass->pre_memory_barriers_.begin(),
-                pass->raw_pass->pre_memory_barriers_.end(),
-                agz::misc::direct_inserter(pass->pre_memory_barriers));
-
-            std::copy(
-                pass->raw_pass->pre_buffer_barriers_.begin(),
-                pass->raw_pass->pre_buffer_barriers_.end(),
-                agz::misc::direct_inserter(pass->pre_buffer_barriers));
-
-            std::copy(
-                pass->raw_pass->pre_image_barriers_.begin(),
-                pass->raw_pass->pre_image_barriers_.end(),
-                agz::misc::direct_inserter(pass->pre_image_barriers));
-
-            std::copy(
-                pass->raw_pass->post_memory_barriers_.begin(),
-                pass->raw_pass->post_memory_barriers_.end(),
-                agz::misc::direct_inserter(pass->post_memory_barriers));
-
-            std::copy(
-                pass->raw_pass->post_buffer_barriers_.begin(),
-                pass->raw_pass->post_buffer_barriers_.end(),
-                agz::misc::direct_inserter(pass->post_buffer_barriers));
-
-            std::copy(
-                pass->raw_pass->post_image_barriers_.begin(),
-                pass->raw_pass->post_image_barriers_.end(),
-                agz::misc::direct_inserter(pass->post_image_barriers));
-        }
-    }
+    assert(record.pass_to_usage.empty());
+    for(auto it = record.usages.begin(); it != record.usages.end(); ++it)
+        record.pass_to_usage.insert({ it->pass, it });
 }
 
 void Compiler::fillExecutableGroup(
-    std::pmr::memory_resource &memory,
-    ExecutableGroup           &group,
-    CompileGroup              &compile)
+    const CompileGroup &group, ExecutableGroup &output)
 {
-    group.queue = compile.passes.front()->raw_pass->queue_;
-    group.passes = Vector<ExecutablePass>(compile.passes.size(), &memory);
-    for(size_t i = 0; i < group.passes.size(); ++i)
-        fillExecutablePass(memory, group.passes[i], *compile.passes[i]);
+    output.queue = group.queue;
+    output.passes.reserve(group.passes.size());
 
-    size_t ext_wait_semaphore_count   = 0;
-    size_t ext_signal_semaphore_count = 0;
-    size_t ext_signal_fence_count     = 0;
-    for(auto pass : compile.passes)
+    for(auto pass : group.passes)
     {
-        ext_wait_semaphore_count   += pass->raw_pass->wait_semaphores_.size();
-        ext_signal_semaphore_count += pass->raw_pass->signal_semaphores_.size();
-        ext_signal_fence_count     += !!pass->raw_pass->signal_fence_;
+        output.passes.emplace_back(memory_);
+        auto &output_pass = output.passes.back();
+
+        output_pass.callback = !pass->raw_pass ? nullptr :
+            (pass->raw_pass->callback_ ? &pass->raw_pass->callback_ : nullptr);
+
+        output_pass.pre_buffer_barriers.reserve(
+            pass->pre_buffer_barriers.size() +
+            pass->pre_ext_buffer_barriers.size());
+        std::ranges::copy(
+            std::views::values(pass->pre_buffer_barriers),
+            std::back_inserter(output_pass.pre_buffer_barriers));
+        std::copy(
+            pass->pre_ext_buffer_barriers.begin(),
+            pass->pre_ext_buffer_barriers.end(),
+            std::back_inserter(output_pass.pre_buffer_barriers));
+
+        output_pass.pre_image_barriers.reserve(
+            pass->pre_image_barriers.size() +
+            pass->pre_ext_image_barriers.size());
+        std::ranges::copy(
+            std::views::values(pass->pre_image_barriers),
+            std::back_inserter(output_pass.pre_image_barriers));
+        std::copy(
+            pass->pre_ext_image_barriers.begin(),
+            pass->pre_ext_image_barriers.end(),
+            std::back_inserter(output_pass.pre_image_barriers));
+
+        output_pass.post_buffer_barriers.reserve(
+            pass->post_ext_buffer_barriers.size());
+        std::copy(
+            pass->post_ext_buffer_barriers.begin(),
+            pass->post_ext_buffer_barriers.end(),
+            std::back_inserter(output_pass.post_buffer_barriers));
+
+        output_pass.post_image_barriers.reserve(
+            pass->post_ext_image_barriers.size());
+        std::copy(
+            pass->post_ext_image_barriers.begin(),
+            pass->post_ext_image_barriers.end(),
+            std::back_inserter(output_pass.post_image_barriers));
+        
+        for(auto &[_, submit] : pass->wait_semaphores)
+            output.wait_semaphores.push_back(submit);
+
+        for(auto &[_, submit] : pass->signal_semaphores)
+        {
+            output.signal_semaphores.push_back(vk::SemaphoreSubmitInfoKHR{
+                .semaphore = submit.semaphore,
+                .value     = submit.value,
+                .stageMask = vk::PipelineStageFlagBits2KHR::eAllCommands
+            });
+        }
+
+        if(pass->raw_pass)
+        {
+            std::copy(
+                pass->raw_pass->signal_fences_.begin(),
+                pass->raw_pass->signal_fences_.end(),
+                std::back_inserter(output.signal_fences));
+        }
     }
 
-    group.wait_semaphores = Vector<vk::SemaphoreSubmitInfoKHR>(&memory);
-    group.wait_semaphores.reserve(compile.heads.size() + ext_wait_semaphore_count);
-    for(auto &[_, dependency] : compile.heads)
+    for(auto &[head, stages] : group.heads)
     {
-        group.wait_semaphores.push_back(vk::SemaphoreSubmitInfoKHR{
-            .semaphore = dependency->semaphore,
-            .stageMask = dependency->wait_stages
+        if(head->queue == group.queue)
+            continue;
+        assert(head->tail_semaphore);
+        output.wait_semaphores.push_back(vk::SemaphoreSubmitInfoKHR{
+            .semaphore = head->tail_semaphore,
+            .value     = head->tail_semaphore.getLastSignalValue(),
+            .stageMask = stages
         });
     }
 
-    group.signal_semaphores = Vector<vk::SemaphoreSubmitInfoKHR>(&memory);
-    group.signal_semaphores.reserve(compile.tails.size() + ext_signal_semaphore_count);
-    for(auto &[_, dependency] : compile.tails)
+    if(group.tail_semaphore)
     {
-        group.signal_semaphores.push_back(vk::SemaphoreSubmitInfoKHR{
-            .semaphore = dependency->semaphore,
+        output.signal_semaphores.push_back(vk::SemaphoreSubmitInfoKHR{
+            .semaphore = group.tail_semaphore,
+            .value     = group.tail_semaphore.getLastSignalValue(),
             .stageMask = vk::PipelineStageFlagBits2KHR::eAllCommands
         });
     }
-
-    group.signal_fences = Vector<vk::Fence>(&memory);
-    group.signal_fences.reserve(ext_signal_fence_count);
-
-    for(auto pass : compile.passes)
-    {
-        auto raw_pass = pass->raw_pass;
-        std::copy(
-            raw_pass->wait_semaphores_.begin(),
-            raw_pass->wait_semaphores_.end(),
-            std::back_inserter(group.wait_semaphores));
-        std::copy(
-            raw_pass->signal_semaphores_.begin(),
-            raw_pass->signal_semaphores_.end(),
-            std::back_inserter(group.signal_semaphores));
-        if(raw_pass->signal_fence_)
-            group.signal_fences.push_back(raw_pass->signal_fence_);
-    }
 }
 
-void Compiler::fillExecutablePass(
-    std::pmr::memory_resource &memory,
-    ExecutablePass            &pass,
-    CompilePass               &compile)
-{
-    if(compile.raw_pass->callback_)
-        pass.callback = &compile.raw_pass->callback_;
-    else
-        pass.callback = nullptr;
-
-    pass.pre_memory_barriers = Vector<vk::MemoryBarrier2KHR>(&memory);
-    pass.pre_memory_barriers.reserve(compile.pre_memory_barriers.size());
-    std::copy(
-        compile.pre_memory_barriers.begin(),
-        compile.pre_memory_barriers.end(),
-        std::back_inserter(pass.pre_memory_barriers));
-
-    pass.pre_buffer_barriers = Vector<vk::BufferMemoryBarrier2KHR>(&memory);
-    pass.pre_buffer_barriers.reserve(compile.pre_buffer_barriers.size());
-    std::copy(
-        compile.pre_buffer_barriers.begin(),
-        compile.pre_buffer_barriers.end(),
-        std::back_inserter(pass.pre_buffer_barriers));
-
-    pass.pre_image_barriers = Vector<vk::ImageMemoryBarrier2KHR>(&memory);
-    pass.pre_image_barriers.reserve(compile.pre_image_barriers.size());
-    std::copy(
-        compile.pre_image_barriers.begin(),
-        compile.pre_image_barriers.end(),
-        std::back_inserter(pass.pre_image_barriers));
-
-    pass.post_memory_barriers = Vector<vk::MemoryBarrier2KHR>(&memory);
-    pass.post_memory_barriers.reserve(
-        compile.raw_pass->post_memory_barriers_.size());
-    std::copy(
-        compile.raw_pass->post_memory_barriers_.begin(),
-        compile.raw_pass->post_memory_barriers_.end(),
-        std::back_inserter(pass.post_memory_barriers));
-
-    pass.post_buffer_barriers = Vector<vk::BufferMemoryBarrier2KHR>(&memory);
-    pass.post_buffer_barriers.reserve(compile.post_buffer_barriers.size());
-    std::copy(
-        compile.post_buffer_barriers.begin(),
-        compile.post_buffer_barriers.end(),
-        std::back_inserter(pass.post_buffer_barriers));
-
-    pass.post_image_barriers = Vector<vk::ImageMemoryBarrier2KHR>(&memory);
-    pass.post_image_barriers.reserve(compile.post_image_barriers.size());
-    std::copy(
-        compile.post_image_barriers.begin(),
-        compile.post_image_barriers.end(),
-        std::back_inserter(pass.post_image_barriers));
-}
-
-VKPT_RENDER_GRAPH_END
+VKPT_GRAPH_END

@@ -46,6 +46,9 @@ using List = std::pmr::list<T>;
 template<typename K, typename V>
 using Map = std::pmr::map<K, V>;
 
+template<typename K, typename V>
+using MultiMap = std::pmr::multimap<K, V>;
+
 template<typename T>
 using Set = std::pmr::set<T>;
 
@@ -53,7 +56,7 @@ template<typename T>
 using PmrQueue = std::queue<T, std::pmr::deque<T>>;
 
 template<typename F>
-auto for_each_subrsc(const vk::ImageSubresourceRange &range, const F &f)
+auto foreachSubrsc(const vk::ImageSubresourceRange &range, const F &f)
 {
     for(uint32_t i = 0; i < range.layerCount; ++i)
     {
@@ -93,6 +96,47 @@ constexpr bool isDepthStencilFormat(vk::Format format)
         format == vk::Format::eD16UnormS8Uint   ||
         format == vk::Format::eD24UnormS8Uint   ||
         format == vk::Format::eD32SfloatS8Uint;
+}
+
+constexpr bool hasDepthAspect(vk::Format format)
+{
+    return
+        format == vk::Format::eD16Unorm ||
+        format == vk::Format::eX8D24UnormPack32 ||
+        format == vk::Format::eD32Sfloat ||
+        format == vk::Format::eD16UnormS8Uint ||
+        format == vk::Format::eD24UnormS8Uint ||
+        format == vk::Format::eD32SfloatS8Uint;
+}
+
+constexpr bool hasStencilAspect(vk::Format format)
+{
+    return
+        format == vk::Format::eS8Uint ||
+        format == vk::Format::eD16UnormS8Uint ||
+        format == vk::Format::eD24UnormS8Uint ||
+        format == vk::Format::eD32SfloatS8Uint;
+}
+
+inline vk::ImageSubresourceRange subrscToRange(
+    const vk::ImageSubresource &subrsc)
+{
+    return vk::ImageSubresourceRange{
+        .aspectMask     = subrsc.aspectMask,
+        .baseMipLevel   = subrsc.mipLevel,
+        .levelCount     = 1,
+        .baseArrayLayer = subrsc.arrayLayer,
+        .layerCount     = 1
+    };
+}
+
+template<bool Cond, typename A, typename B>
+decltype(auto) conditional(A &&a, B &&b)
+{
+    if constexpr(Cond)
+        return std::forward<A>(a);
+    else
+        return std::forward<B>(b);
 }
 
 VKPT_END

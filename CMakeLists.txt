@@ -43,4 +43,3 @@ ENDFOREACH()
 
 ADD_SUBDIRECTORY(vkpt)
 ADD_SUBDIRECTORY(sample/00.triangle)
-ADD_SUBDIRECTORY(sample/01.deferred)

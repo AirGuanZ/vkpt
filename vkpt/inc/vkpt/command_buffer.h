@@ -1,8 +1,11 @@
 #pragma once
 
-#include <vkpt/object/pipeline.h>
+#include <vkpt/common.h>
 
 VKPT_BEGIN
+
+class Pipeline;
+class Framebuffer;
 
 class CommandBuffer
 {

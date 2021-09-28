@@ -32,10 +32,12 @@ ResourceUploader::~ResourceUploader()
 }
 
 void ResourceUploader::uploadBuffer(
-    vk::Buffer  dst_buffer,
+    Buffer      dst_buffer,
     const void *data,
     size_t      bytes)
 {
+    assert(dst_buffer.getState().is<FreeState>());
+
     is_dirty_ = true;
 
     if(bytes < 256)
@@ -68,37 +70,12 @@ void ResourceUploader::uploadBuffer(
     staging_resource.buffer = std::move(staging_buffer);
     staging_resources_.push_back(
         std::make_unique<StagingBuffer>(std::move(staging_resource)));
-}
 
-void ResourceUploader::uploadBuffer(
-    vk::Buffer  dst_buffer,
-    const void *data,
-    size_t      bytes,
-    uint32_t    dst_queue_family_index)
-{
-    uploadBuffer(dst_buffer, data, bytes);
-
-    if(dst_queue_family_index != queue_->getFamilyIndex())
-    {
-        buffer_memory_barriers_.push_back(vk::BufferMemoryBarrier{
-            .srcAccessMask       = vk::AccessFlagBits::eTransferWrite,
-            .dstAccessMask       = {},
-            .srcQueueFamilyIndex = queue_->getFamilyIndex(),
-            .dstQueueFamilyIndex = dst_queue_family_index,
-            .buffer              = dst_buffer,
-            .offset              = 0,
-            .size                = bytes
-        });
-    }
-}
-
-void ResourceUploader::uploadBuffer(
-    vk::Buffer   dst_buffer,
-    const void  *data,
-    size_t       bytes,
-    const Queue &dst_queue)
-{
-    uploadBuffer(dst_buffer, data, bytes, dst_queue.getFamilyIndex());
+    dst_buffer.getState() = UsingState{
+        .queue  = queue_,
+        .stages = vk::PipelineStageFlagBits2KHR::eNone,
+        .access = vk::AccessFlagBits2KHR::eNone
+    };
 }
 
 void ResourceUploader::submitAndSync()

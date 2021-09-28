@@ -1,159 +1,225 @@
 #include <vkpt/graph/compiler.h>
-#include <vkpt/graph/finalizer.h>
-#include <vkpt/context.h>
 
-VKPT_RENDER_GRAPH_BEGIN
+VKPT_GRAPH_BEGIN
 
-void Pass::setCallback(Callback callback)
+void PassContext::newCommandBuffer()
 {
-    callback_ = std::move(callback);
+    assert(!command_buffers_.empty());
+    command_buffers_.back().commandBuffer.end();
+
+    auto new_command_buffer =
+        command_buffer_allocator_.newCommandBuffer(queue_type_);
+    new_command_buffer.begin(true);
+    command_buffers_.push_back(vk::CommandBufferSubmitInfoKHR{
+        .commandBuffer = new_command_buffer.getRaw()
+    });
 }
 
-void Pass::setCallback(Callback2 callback)
+CommandBuffer PassContext::getCommandBuffer()
 {
-    callback_ = [c = std::move(callback)](PassContext &ctx)
-    {
-        auto command_buffer = ctx.getCommandBuffer();
-        c(command_buffer);
-    };
+    assert(!command_buffers_.empty());
+    return CommandBuffer(command_buffers_.back().commandBuffer);
+}
+
+PassContext::PassContext(
+    Queue::Type                             queue_type,
+    CommandBufferAllocator                 &command_buffer_allocator,
+    Vector<vk::CommandBufferSubmitInfoKHR> &command_buffers)
+    : queue_type_(queue_type),
+      command_buffer_allocator_(command_buffer_allocator),
+      command_buffers_(command_buffers)
+{
+    auto new_command_buffer =
+        command_buffer_allocator_.newCommandBuffer(queue_type_);
+    new_command_buffer.begin(true);
+    command_buffers_.push_back(vk::CommandBufferSubmitInfoKHR{
+        .commandBuffer = new_command_buffer.getRaw()
+    });
 }
 
 void Pass::use(
-    const Buffer              &buffer,
-    vk::PipelineStageFlags2KHR stages,
-    vk::AccessFlags2KHR        access)
+    const Image                &image,
+    const vk::ImageSubresource &subrsc,
+    const ResourceUsage        &usage,
+    const ResourceUsage        &exit_usage)
 {
-    buffer_usages_.insert({ buffer, { stages, access } });
+    if(exit_usage == USAGE_NIL)
+        use(image, subrsc, usage, usage);
+    else
+    {
+        image_usages_.insert(
+            {
+                { image, subrsc },
+                {
+                    usage.stages, usage.access, usage.layout,
+                    exit_usage.stages, exit_usage.access, exit_usage.layout
+                }
+            });
+    }
+}
+
+void Pass::use(
+    const Image         &image,
+    const ResourceUsage &usage,
+    const ResourceUsage &exit_usage)
+{
+    auto &desc = image.getDescription();
+
+    const bool has_depth   = hasDepthAspect(desc.format);
+    const bool has_stencil = hasStencilAspect(desc.format);
+    const bool has_color   = !has_depth && !has_stencil;
+
+    if(has_depth)
+        use(image, vk::ImageAspectFlagBits::eDepth, usage, exit_usage);
+    
+    if(has_stencil)
+        use(image, vk::ImageAspectFlagBits::eStencil, usage, exit_usage);
+
+    if(has_color)
+        use(image, vk::ImageAspectFlagBits::eColor, usage, exit_usage);
+}
+
+void Pass::use(
+    const Image         &image,
+    vk::ImageAspectFlags aspect,
+    const ResourceUsage &usage,
+    const ResourceUsage &exit_usage)
+{
+    auto &desc = image.getDescription();
+    use(image, vk::ImageSubresourceRange{
+        .aspectMask     = aspect,
+        .baseMipLevel   = 0,
+        .levelCount     = desc.mip_levels,
+        .baseArrayLayer = 0,
+        .layerCount     = desc.array_layers
+    }, usage, exit_usage);
 }
 
 void Pass::use(
     const Image                     &image,
-    const vk::ImageSubresourceRange &subrsc,
-    vk::PipelineStageFlags2KHR       stages,
-    vk::AccessFlags2KHR              access,
-    vk::ImageLayout                  layout)
+    const vk::ImageSubresourceRange &range,
+    const ResourceUsage             &usage,
+    const ResourceUsage             &exit_usage)
 {
-    image_usages_.insert({ { image, subrsc }, { stages, access, layout } });
+    foreachSubrsc(range, [&](const vk::ImageSubresource &subrsc)
+    {
+        use(image, subrsc, usage, exit_usage);
+    });
 }
 
 void Pass::use(
-    const Image               &image,
-    vk::ImageAspectFlags       aspect,
-    vk::PipelineStageFlags2KHR stages,
-    vk::AccessFlags2KHR        access,
-    vk::ImageLayout            layout)
+    const Buffer        &buffer,
+    const ResourceUsage &usage,
+    const ResourceUsage &exit_usage)
 {
-    const vk::ImageSubresourceRange range = {
-        .aspectMask     = aspect,
-        .baseMipLevel   = 0,
-        .levelCount     = image.getDescription().mip_levels,
-        .baseArrayLayer = 0,
-        .layerCount     = image.getDescription().array_layers
-    };
-    use(image, range, stages, access, layout);
-}
-
-void Pass::use(const Image &image, const ImageState &usage)
-{
-    const auto aspect = inferImageAspect(image.getDescription().format, usage);
-    use(image, aspect, usage.stages, usage.access, usage.layout);
-}
-
-void Pass::wait(vk::Semaphore semaphore, vk::PipelineStageFlags2KHR stage)
-{
-    wait_semaphores_.push_back(vk::SemaphoreSubmitInfoKHR{
-        .semaphore = semaphore,
-        .stageMask = stage
-    });
-}
-
-void Pass::signal(vk::Semaphore semaphore, vk::PipelineStageFlagBits2KHR stage)
-{
-    signal_semaphores_.push_back(vk::SemaphoreSubmitInfoKHR{
-        .semaphore = semaphore,
-        .stageMask = stage
-    });
+    if(exit_usage == USAGE_NIL)
+        use(buffer, usage, usage);
+    else
+    {
+        buffer_usages_.insert(
+            {
+                buffer,
+                {
+                    usage.stages, usage.access,
+                    exit_usage.stages, exit_usage.access
+                }
+            });
+    }
 }
 
 void Pass::signal(vk::Fence fence)
 {
-    signal_fence_ = fence;
+    signal_fences_.push_back(fence);
 }
 
-Pass::Pass(
-    Queue                     *queue,
-    int                        index,
-    std::pmr::memory_resource &memory)
-    : queue_(queue), index_(index),
+void Pass::setCallback(Callback callback)
+{
+    callback_.swap(callback);
+}
+
+void Pass::setName(std::string name)
+{
+    name_.swap(name);
+}
+
+const std::string &Pass::getName() const
+{
+    return name_;
+}
+
+Pass::Pass(std::pmr::memory_resource &memory)
+    : queue_(nullptr),
+      index_(-1),
       buffer_usages_(&memory),
       image_usages_(&memory),
-      signal_semaphores_(&memory),
-      wait_semaphores_(&memory),
-      pre_memory_barriers_(&memory),
-      pre_buffer_barriers_(&memory),
-      pre_image_barriers_(&memory),
-      post_memory_barriers_(&memory),
-      post_buffer_barriers_(&memory),
-      post_image_barriers_(&memory),
-      heads_(&memory),
-      tails_(&memory)
-{
-
-}
-
-vk::ImageAspectFlags Pass::inferImageAspect(
-    vk::Format format, const ImageState &usage)
-{
-    const bool has_depth_aspect =
-        format == vk::Format::eD16Unorm ||
-        format == vk::Format::eX8D24UnormPack32 ||
-        format == vk::Format::eD32Sfloat ||
-        format == vk::Format::eD16UnormS8Uint ||
-        format == vk::Format::eD24UnormS8Uint ||
-        format == vk::Format::eD32SfloatS8Uint;
-
-    const bool has_stencil_aspect =
-        format == vk::Format::eS8Uint ||
-        format == vk::Format::eD16UnormS8Uint ||
-        format == vk::Format::eD24UnormS8Uint ||
-        format == vk::Format::eD32SfloatS8Uint;
-
-    if(!has_depth_aspect && !has_stencil_aspect)
-        return vk::ImageAspectFlagBits::eColor;
-
-    if(has_depth_aspect && has_stencil_aspect)
-    {
-        return vk::ImageAspectFlagBits::eDepth |
-               vk::ImageAspectFlagBits::eStencil;
-    }
-
-    if(has_depth_aspect)
-        return vk::ImageAspectFlagBits::eDepth;
-
-    assert(has_stencil_aspect);
-    return vk::ImageAspectFlagBits::eStencil;
-}
-
-Graph::Graph()
-    : object_arena_(memory_arena_), passes_(&memory_arena_)
+      signal_fences_(&memory),
+      tails_(&memory),
+      heads_(&memory)
 {
     
 }
 
-Pass *Graph::addPass(Queue *queue, Pass::Callback callback)
+Graph::Graph()
+    : arena_(memory_),
+      passes_(&memory_),
+      buffer_waits_(&memory_),
+      image_waits_(&memory_),
+      buffer_signals_(&memory_),
+      image_signals_(&memory_)
 {
-    const int index = static_cast<int>(passes_.size());
-    auto pass = object_arena_.create<Pass>(queue, index, memory_arena_);
-    if(callback)
-        pass->setCallback(std::move(callback));
+    
+}
+
+Pass *Graph::addPass(const Queue *queue)
+{
+    Pass *pass = arena_.create<Pass>(memory_);
+    pass->queue_ = queue;
+    pass->index_ = static_cast<int>(passes_.size());
     passes_.push_back(pass);
     return pass;
 }
 
-void Graph::finalize()
+void Graph::waitBeforeFirstUsage(
+    const Buffer &buffer,
+    Semaphore     semaphore)
 {
-    Finalizer finalizer;
-    finalizer.finalize(*this);
+    assert(!buffer_waits_.contains(buffer));
+    buffer_waits_.insert({ buffer, semaphore });
+}
+
+void Graph::waitBeforeFirstUsage(
+    const ImageSubresource &image_subrsc,
+    Semaphore               semaphore)
+{
+    assert(!image_waits_.contains(image_subrsc));
+    image_waits_.insert({ image_subrsc, semaphore });
+}
+
+void Graph::signalAfterLastUsage(
+    const Buffer &buffer,
+    Semaphore     semaphore,
+    const Queue  *next_queue,
+    bool          release_only)
+{
+    assert(!buffer_signals_.contains(buffer));
+    buffer_signals_.insert({
+        buffer,
+        { semaphore, next_queue, vk::ImageLayout::eUndefined, release_only }
+    });
+}
+
+void Graph::signalAfterLastUsage(
+    const ImageSubresource &image_subrsc,
+    Semaphore               semaphore,
+    const Queue            *next_queue,
+    vk::ImageLayout         next_layout,
+    bool                    release_only)
+{
+    assert(!image_signals_.contains(image_subrsc));
+    image_signals_.insert({
+        image_subrsc,
+        { semaphore, next_queue, next_layout, release_only }
+    });
 }
 
 void Graph::execute(
@@ -161,34 +227,28 @@ void Graph::execute(
     CommandBufferAllocator      &command_buffer_allocator,
     const std::function<void()> &after_record_callback)
 {
-    agz::alloc::memory_resource_arena_t memory;
-
     Compiler compiler;
-    auto exec_graph = compiler.compile(memory, semaphore_allocator, *this);
+    auto exec = compiler.compile(semaphore_allocator, *this);
 
     Executor executor;
-    executor.record(command_buffer_allocator, exec_graph);
+    executor.record(command_buffer_allocator, exec);
+
     if(after_record_callback)
         after_record_callback();
 
-    executor.submit(exec_graph);
-}
-
-void Graph::execute(
-    FrameResources              &frame_resource,
-    const std::function<void()> &after_record_callback)
-{
-    execute(frame_resource, frame_resource, after_record_callback);
+    executor.submit();
 }
 
 void Graph::addDependency(std::initializer_list<Pass*> passes)
 {
-    auto p = passes.begin();
+    auto ptr = passes.begin();
     for(size_t i = 1; i < passes.size(); ++i)
     {
-        p[i - 1]->tails_.insert(p[i]);
-        p[i]->heads_.insert(p[i - 1]);
+        auto head = ptr[i - 1];
+        auto tail = ptr[i];
+        head->tails_.insert(tail);
+        tail->heads_.insert(head);
     }
 }
 
-VKPT_RENDER_GRAPH_END
+VKPT_GRAPH_END

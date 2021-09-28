@@ -5,7 +5,6 @@
 #include <vkpt/object/queue.h>
 #include <vkpt/graph/graph.h>
 #include <vkpt/command_buffer.h>
-#include <vkpt/resource_allocator.h>
 
 struct GLFWwindow;
 
@@ -18,13 +17,13 @@ class ImGuiIntegration : public agz::misc::uncopyable_t
 public:
     
     ImGuiIntegration(
-        GLFWwindow             *window,
-        vk::Instance            instance,
-        vk::PhysicalDevice      physical_device,
-        vk::Device              device,
-        Queue                  *queue,
-        uint32_t                image_count,
-        const ImageDescription &image_desc);
+        GLFWwindow               *window,
+        vk::Instance              instance,
+        vk::PhysicalDevice        physical_device,
+        vk::Device                device,
+        Queue                    *queue,
+        uint32_t                  image_count,
+        const Image::Description &image_desc);
 
     ImGuiIntegration(ImGuiIntegration &&other) noexcept;
 

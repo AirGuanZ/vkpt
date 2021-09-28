@@ -2,95 +2,48 @@
 
 #include <agz-utils/alloc.h>
 
-#include <vkpt/frame_resources.h>
-#include <vkpt/resource_allocator.h>
+#include <vkpt/allocator/command_buffer_allocator.h>
+#include <vkpt/allocator/semaphore_allocator.h>
+#include <vkpt/graph/usage.h>
+#include <vkpt/object/semaphore.h>
+#include <vkpt/resource/buffer.h>
+#include <vkpt/resource/image.h>
 
-#define VKPT_RENDER_GRAPH_BEGIN VKPT_BEGIN namespace rg {
-#define VKPT_RENDER_GRAPH_END   } VKPT_END
+VKPT_GRAPH_BEGIN
 
-VKPT_BEGIN
-
-class Context;
-
-VKPT_END
-
-VKPT_RENDER_GRAPH_BEGIN
-
-class Compiler;
-class Graph;
-class Finalizer;
-class PassContext;
-
-struct BufferState
-{
-    vk::PipelineStageFlags2KHR stages;
-    vk::AccessFlags2KHR        access;
-};
-
-struct ImageState
-{
-    vk::PipelineStageFlags2KHR stages;
-    vk::AccessFlags2KHR        access;
-    vk::ImageLayout            layout;
-};
-
-inline BufferState operator|(const BufferState &lhs, const BufferState &rhs)
-{
-    return BufferState{
-        .stages = lhs.stages | rhs.stages,
-        .access = lhs.access | rhs.access
-    };
-}
-
-inline ImageState operator|(const ImageState &lhs, const ImageState &rhs)
-{
-    assert(lhs.layout == rhs.layout);
-    return ImageState{
-        .stages = lhs.stages | rhs.stages,
-        .access = lhs.access | rhs.access,
-        .layout = lhs.layout
-    };
-}
-
-namespace state
-{
-
-    constexpr inline ImageState RenderTargetColor = {
-        .stages = vk::PipelineStageFlagBits2KHR::eColorAttachmentOutput,
-        .access = vk::AccessFlagBits2KHR::eColorAttachmentWrite,
-        .layout = vk::ImageLayout::eColorAttachmentOptimal
-    };
-
-    constexpr inline ImageState RenderTargetDepthStencil = {
-        .stages = vk::PipelineStageFlagBits2KHR::eEarlyFragmentTests |
-                  vk::PipelineStageFlagBits2KHR::eLateFragmentTests,
-        .access = vk::AccessFlagBits2KHR::eDepthStencilAttachmentRead |
-                  vk::AccessFlagBits2KHR::eDepthStencilAttachmentWrite,
-        .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal
-    };
-
-    constexpr inline ImageState RenderTargetDepthStencilReadOnly = {
-        .stages = vk::PipelineStageFlagBits2KHR::eEarlyFragmentTests |
-                  vk::PipelineStageFlagBits2KHR::eLateFragmentTests,
-        .access = vk::AccessFlagBits2KHR::eDepthStencilAttachmentRead,
-        .layout = vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal
-    };
-
-} // namespace state
-
-class Pass : public agz::misc::uncopyable_t
+class PassContext
 {
 public:
 
-    using Callback  = std::function<void(PassContext &)>;
-    using Callback2 = std::function<void(CommandBuffer &)>;
+    void newCommandBuffer();
 
-    using ImageUsageKey = std::pair<Image, vk::ImageSubresourceRange>;
+    CommandBuffer getCommandBuffer();
+
+private:
+
+    friend class Executor;
+
+    PassContext(
+        Queue::Type                             queue_type,
+        CommandBufferAllocator                 &command_buffer_allocator,
+        Vector<vk::CommandBufferSubmitInfoKHR> &command_buffers);
+
+    Queue::Type                             queue_type_;
+    CommandBufferAllocator                 &command_buffer_allocator_;
+    Vector<vk::CommandBufferSubmitInfoKHR> &command_buffers_;
+};
+
+class Pass
+{
+public:
 
     struct BufferUsage
     {
         vk::PipelineStageFlags2KHR stages;
         vk::AccessFlags2KHR        access;
+
+        vk::PipelineStageFlags2KHR end_stages;
+        vk::AccessFlags2KHR        end_access;
     };
 
     struct ImageUsage
@@ -98,77 +51,75 @@ public:
         vk::PipelineStageFlags2KHR stages;
         vk::AccessFlags2KHR        access;
         vk::ImageLayout            layout;
+
+        vk::PipelineStageFlags2KHR end_stages;
+        vk::AccessFlags2KHR        end_access;
+        vk::ImageLayout            end_layout;
     };
 
-    void setCallback(Callback callback);
-
-    void setCallback(Callback2 callback);
+    using Callback = std::function<void(PassContext &)>;
 
     void use(
-        const Buffer              &buffer,
-        vk::PipelineStageFlags2KHR stages,
-        vk::AccessFlags2KHR        access);
-
+        const Image                &image,
+        const vk::ImageSubresource &subrsc,
+        const ResourceUsage        &usage,
+        const ResourceUsage        &exit_usage = USAGE_NIL);
+    
+    void use(
+        const Image         &image,
+        const ResourceUsage &usage,
+        const ResourceUsage &exit_usage = USAGE_NIL);
+    
+    void use(
+        const Image         &image,
+        vk::ImageAspectFlags aspect,
+        const ResourceUsage &usage,
+        const ResourceUsage &exit_usage = USAGE_NIL);
+    
     void use(
         const Image                     &image,
-        const vk::ImageSubresourceRange &subrsc,
-        vk::PipelineStageFlags2KHR       stages,
-        vk::AccessFlags2KHR              access,
-        vk::ImageLayout                  layout);
+        const vk::ImageSubresourceRange &range,
+        const ResourceUsage             &usage,
+        const ResourceUsage             &exit_usage = USAGE_NIL);
 
     void use(
-        const Image                     &image,
-        vk::ImageAspectFlags             aspect,
-        vk::PipelineStageFlags2KHR       stages,
-        vk::AccessFlags2KHR              access,
-        vk::ImageLayout                  layout);
-
-    void use(const Image &image, const ImageState &usage);
-
-    void wait(vk::Semaphore semaphore, vk::PipelineStageFlags2KHR stage);
-
-    void signal(vk::Semaphore semaphore, vk::PipelineStageFlagBits2KHR stage);
+        const Buffer        &buffer,
+        const ResourceUsage &usage,
+        const ResourceUsage &exit_usage = USAGE_NIL);
 
     void signal(vk::Fence fence);
 
+    void setCallback(Callback callback);
+
+    void setName(std::string name);
+
+    const std::string &getName() const;
+
+    auto &_bufferUsages() const { return buffer_usages_; }
+    auto &_imageUsages()  const { return image_usages_; }
+
 private:
-
-    Pass(
-        Queue                     *queue,
-        int                        index,
-        std::pmr::memory_resource &memory);
-
-    static vk::ImageAspectFlags inferImageAspect(
-        vk::Format format, const ImageState &usage);
 
     friend class agz::alloc::object_releaser_t;
     friend class Compiler;
     friend class Graph;
-    friend class Finalizer;
+    friend class GroupBarrierGenerator;
 
-    Queue *queue_;
-    int    index_;
+    explicit Pass(std::pmr::memory_resource &memory);
+
+    const Queue *queue_;
+    int          index_;
+    std::string  name_;
 
     Callback callback_;
 
-    Map<Buffer, BufferUsage>       buffer_usages_;
-    Map<ImageUsageKey, ImageUsage> image_usages_;
+    Map<Buffer, BufferUsage>          buffer_usages_;
+    Map<ImageSubresource, ImageUsage> image_usages_;
 
-    List<vk::SemaphoreSubmitInfoKHR> signal_semaphores_;
-    List<vk::SemaphoreSubmitInfoKHR> wait_semaphores_;
+    List<vk::Fence> signal_fences_;
 
-    List<vk::MemoryBarrier2KHR>       pre_memory_barriers_;
-    List<vk::BufferMemoryBarrier2KHR> pre_buffer_barriers_;
-    List<vk::ImageMemoryBarrier2KHR>  pre_image_barriers_;
-
-    List<vk::MemoryBarrier2KHR>       post_memory_barriers_;
-    List<vk::BufferMemoryBarrier2KHR> post_buffer_barriers_;
-    List<vk::ImageMemoryBarrier2KHR>  post_image_barriers_;
-
-    Set<Pass *> heads_;
     Set<Pass *> tails_;
-
-    vk::Fence signal_fence_;
+    Set<Pass *> heads_;
 };
 
 class Graph
@@ -177,33 +128,63 @@ public:
 
     Graph();
 
-    Pass *addPass(Queue *queue, Pass::Callback callback = {});
+    Pass *addPass(const Queue *queue);
+
+    void waitBeforeFirstUsage(
+        const Buffer &buffer,
+        Semaphore     semaphore);
+
+    void signalAfterLastUsage(
+        const Buffer &buffer,
+        Semaphore     semaphore,
+        const Queue  *next_queue,
+        bool          release_only);
+
+    void waitBeforeFirstUsage(
+        const ImageSubresource &image_subrsc,
+        Semaphore               wait_semaphore);
+
+    void signalAfterLastUsage(
+        const ImageSubresource &image_subrsc,
+        Semaphore               semaphore,
+        const Queue            *next_queue,
+        vk::ImageLayout         next_layout,
+        bool                    release_only);
 
     template<typename...Args>
     void addDependency(Args...passes);
-
-    void finalize();
 
     void execute(
         SemaphoreAllocator          &semaphore_allocator,
         CommandBufferAllocator      &command_buffer_allocator,
         const std::function<void()> &after_record_callback = {});
-    
-    void execute(
-        FrameResources              &frame_resource,
-        const std::function<void()> &after_record_callback = {});
 
 private:
 
     friend class Compiler;
-    friend class Finalizer;
+    friend class SemaphoreSignalHandler;
+    friend class SemaphoreWaitHandler;
+
+    struct Signal
+    {
+        mutable Semaphore semaphore;
+        const Queue      *queue;
+        vk::ImageLayout   layout;
+        bool              release_only;
+    };
 
     void addDependency(std::initializer_list<Pass *> passes);
 
-    agz::alloc::memory_resource_arena_t memory_arena_;
-    agz::alloc::object_releaser_t       object_arena_;
+    agz::alloc::memory_resource_arena_t memory_;
+    agz::alloc::object_releaser_t       arena_;
 
     List<Pass *> passes_;
+
+    Map<Buffer, Semaphore>           buffer_waits_;
+    Map<ImageSubresource, Semaphore> image_waits_;
+
+    Map<Buffer, Signal>           buffer_signals_;
+    Map<ImageSubresource, Signal> image_signals_;
 };
 
 template<typename...Args>
@@ -213,4 +194,4 @@ void Graph::addDependency(Args...passes)
     this->addDependency({ passes... });
 }
 
-VKPT_RENDER_GRAPH_END
+VKPT_GRAPH_END

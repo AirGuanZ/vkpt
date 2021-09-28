@@ -1,10 +1,11 @@
 #include <iostream>
 
-#include <vkpt/graph/compiler.h>
+#include <vkpt/graph/graph.h>
 #include <vkpt/object/pipeline.h>
 #include <vkpt/context.h>
-#include <vkpt/resource_allocator.h>
-#include <vkpt/vertex.h>
+#include <vkpt/utility/vertex.h>
+
+#include "vkpt/graph/compiler.h"
 
 using namespace vkpt;
 
@@ -134,9 +135,9 @@ void run()
             framebuffers = createFramebuffers(context, pipeline);
     });
 
-    AGZ_SCOPE_GUARD({ context.waitIdle(); });
-
     auto &imgui = context.getImGuiIntegration();
+
+    AGZ_SCOPE_EXIT{ context.waitIdle(); };
 
     while(!context.getCloseFlag())
     {
@@ -149,7 +150,7 @@ void run()
 
         frame_resources.beginFrame();
         imgui.newFrame();
-
+        
         if(ImGui::Begin("vkpt", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
             ImGui::Text("hello, world!");
@@ -158,12 +159,28 @@ void run()
 
         rg::Graph graph;
 
-        auto acquire_pass = context.addAcquireImagePass(graph);
+        auto image_subrsc = ImageSubresource{
+            context.getImage(),
+            vk::ImageSubresource{
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .mipLevel   = 0,
+                .arrayLayer = 0
+            }
+        };
+
+        graph.waitBeforeFirstUsage(
+            image_subrsc, context.getImageAvailableSemaphore());
+
+        graph.signalAfterLastUsage(
+            image_subrsc, context.getPresentAvailableSemaphore(),
+            context.getPresentQueue(), vk::ImageLayout::ePresentSrcKHR, false);
 
         auto triangle_pass = graph.addPass(context.getGraphicsQueue());
-        triangle_pass->use(context.getImage(), rg::state::RenderTargetColor);
-        triangle_pass->setCallback([&](CommandBuffer &command_buffer)
+        triangle_pass->use(image_subrsc.image, rg::USAGE_RENDER_TARGET);
+        triangle_pass->setCallback([&](rg::PassContext &pass_context)
         {
+            auto command_buffer = pass_context.getCommandBuffer();
+
             command_buffer.beginPipeline(
                 pipeline, framebuffers[context.getImageIndex()],
                 { vk::ClearColorValue{ std::array{ 0.0f, 0.0f, 0.0f, 0.0f } } });
@@ -181,13 +198,9 @@ void run()
 
         auto imgui_pass = imgui.addToGraph(context.getImageView(), graph);
 
-        auto present_pass = context.addPresentImagePass(graph);
+        graph.addDependency(triangle_pass, imgui_pass);
 
-        graph.addDependency(
-            acquire_pass, triangle_pass, imgui_pass, present_pass);
-
-        graph.finalize();
-        graph.execute(frame_resources);
+        graph.execute(frame_resources, frame_resources);
 
         context.swapBuffers();
 

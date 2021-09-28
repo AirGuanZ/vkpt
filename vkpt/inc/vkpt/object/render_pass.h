@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vkpt/object/framebuffer.h>
-#include <vkpt/object/image.h>
+#include <vkpt/resource/image.h>
 
 VKPT_BEGIN
 

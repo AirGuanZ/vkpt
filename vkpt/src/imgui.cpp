@@ -91,13 +91,13 @@ struct ImGuiIntegration::Impl
 };
 
 ImGuiIntegration::ImGuiIntegration(
-    GLFWwindow             *window,
-    vk::Instance            instance,
-    vk::PhysicalDevice      physical_device,
-    vk::Device              device,
-    Queue                  *queue,
-    uint32_t                image_count,
-    const ImageDescription &image_desc)
+    GLFWwindow               *window,
+    vk::Instance              instance,
+    vk::PhysicalDevice        physical_device,
+    vk::Device                device,
+    Queue                    *queue,
+    uint32_t                  image_count,
+    const Image::Description &image_desc)
 {
     impl_ = std::make_unique<Impl>();
     impl_->device      = device;
@@ -221,10 +221,17 @@ void ImGuiIntegration::render(
 rg::Pass *ImGuiIntegration::addToGraph(
     const ImageView &image_view, rg::Graph &graph)
 {
+    const vk::ImageSubresource subrsc = {
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .mipLevel   = 0,
+        .arrayLayer = 0
+    };
     auto pass = graph.addPass(impl_->queue);
-    pass->use(image_view.getImage(), rg::state::RenderTargetColor);
-    pass->setCallback([image_view, this](CommandBuffer &command_buffer)
+    pass->use(
+        image_view.getImage(), subrsc, rg::USAGE_RENDER_TARGET);
+    pass->setCallback([image_view, this](rg::PassContext &context)
     {
+        auto command_buffer = context.getCommandBuffer();
         render(image_view, command_buffer);
     });
     return pass;

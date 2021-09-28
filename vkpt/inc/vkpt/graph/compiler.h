@@ -1,123 +1,81 @@
 #pragma once
 
-#include <bitset>
-#include <span>
-
+#include <vkpt/graph/compile_internal.h>
 #include <vkpt/graph/executor.h>
-#include <vkpt/graph/resource_tracer.h>
+#include <vkpt/graph/resource_records.h>
+#include <vkpt/graph/transitive_closure.h>
 
-VKPT_RENDER_GRAPH_BEGIN
+VKPT_GRAPH_BEGIN
 
-class Compiler
+class Compiler : protected Messenger
 {
 public:
 
     Compiler();
 
+    void setMessenger(std::function<void(const std::string &)> func);
+
     ExecutableGraph compile(
-        std::pmr::memory_resource &memory,
-        SemaphoreAllocator        &semaphore_allocator,
-        Graph                     &graph);
-    
-    ExecutableGraph compile(
-        SemaphoreAllocator        &semaphore_allocator,
-        Graph                     &graph);
+        SemaphoreAllocator &semaphore_allocator,
+        const Graph        &graph);
 
 private:
 
-    struct CompileGroup;
+    void initializeCompilePasses(const Graph &graph);
 
-    struct CompilePass
-    {
-        explicit CompilePass(std::pmr::memory_resource &memory);
+    void topologySortCompilePasses();
+    
+    void buildTransitiveClosure();
 
-        Pass *raw_pass = nullptr;
+    void collectResourceUsages();
 
-        std::bitset<64> group_flags;
-        CompileGroup   *group = nullptr;
+    template<typename Rsc>
+    void processUnwaitedFirstUsage(const Rsc &resource);
 
-        int unprocessed_head_count = 0;
+    template<typename Rsc>
+    void processUnsignaledFinalState(const Rsc &rsc);
 
-        Set<vk::MemoryBarrier2KHR>       pre_memory_barriers;
-        Set<vk::BufferMemoryBarrier2KHR> pre_buffer_barriers;
-        Set<vk::ImageMemoryBarrier2KHR>  pre_image_barriers;
-        Set<vk::MemoryBarrier2KHR>       post_memory_barriers;
-        Set<vk::BufferMemoryBarrier2KHR> post_buffer_barriers;
-        Set<vk::ImageMemoryBarrier2KHR>  post_image_barriers;
-    };
-
-    struct CompileGroup
-    {
-        explicit CompileGroup(std::pmr::memory_resource &memory);
-
-        Vector<CompilePass *> passes;
-        
-        struct GroupDependency
-        {
-            vk::Semaphore              semaphore;
-            //vk::PipelineStageFlags2KHR signal_stages = {};
-            vk::PipelineStageFlags2KHR wait_stages   = {};
-        };
-
-        Map<CompileGroup *, GroupDependency *> heads;
-        Map<CompileGroup *, GroupDependency *> tails;
-
-        int unprocessed_head_count = 0;
-    };
-
-    using ImageStateKey = std::pair<vk::Image, vk::ImageSubresource>;
+    void mergeGeneratedPreAndPostPasses();
 
     template<bool Reverse>
-    void newGroupFlag(CompilePass *compile_entry, size_t bit_index);
+    void addGroupFlag(CompilePass *entry, size_t bit_index);
 
     void generateGroupFlags();
 
-    void generateGroups();
+    List<CompileGroup *> generateGroups();
 
-    void fillGroupArcs();
+    void fillInterGroupArcs(const List<CompileGroup *> &groups);
 
-    void sortGroups();
+    void topologySortGroups(const List<CompileGroup *> &groups);
 
-    void sortPasses();
+    void topologySortPassesInGroup(CompileGroup *group);
 
-    void fillInterGroupSemaphores(SemaphoreAllocator &semaphore_allocator);
+    void fillInterGroupSemaphores(SemaphoreAllocator &allocator);
 
-    void fillResourceStateTracers();
+    void buildPassToUsage(CompileBuffer &record);
 
-    CompileGroup::GroupDependency *findHeadDependency(
-        CompileGroup *src, CompileGroup *dst) const;
-
-    void processBufferDependency(
-        Pass                    *pass,
-        const Buffer            &buffer,
-        const Pass::BufferUsage &usage);
-
-    void processImageDependency(
-        Pass                       *pass,
-        const Image                &image,
-        const vk::ImageSubresource &subrsc,
-        const Pass::ImageUsage     &usage);
-
-    void generateBarriers();
+    void buildPassToUsage(CompileImage &record);
 
     void fillExecutableGroup(
-        std::pmr::memory_resource &memory,
-        ExecutableGroup           &group,
-        CompileGroup              &compile);
+        const CompileGroup &group, ExecutableGroup &output);
 
-    void fillExecutablePass(
-        std::pmr::memory_resource &memory,
-        ExecutablePass            &pass,
-        CompilePass               &compile);
+    std::pmr::unsynchronized_pool_resource memory_;
+    agz::alloc::obj_arena_t                arena_;
 
-    agz::alloc::memory_resource_arena_t memory_arena_;
-    agz::alloc::object_releaser_t       object_arena_;
+    Set<CompilePass *>    compile_passes_;
+    Vector<CompilePass *> sorted_compile_passes_;
 
-    Vector<CompilePass *>  compile_passes_;
     Vector<CompileGroup *> compile_groups_;
 
-    Map<vk::Buffer, BufferStateTracer>   buffer_states_;
-    Map<ImageStateKey, ImageStateTracer> image_states_;
+    DAGTransitiveClosure *closure_;
+
+    List<CompilePass *> generated_pre_passes_;
+    List<CompilePass *> generated_post_passes_;
+
+    ResourceRecords resource_records_;
+
+    Map<Buffer, ResourceState>           buffer_final_states_;
+    Map<ImageSubresource, ResourceState> image_final_states_;
 };
 
-VKPT_RENDER_GRAPH_END
+VKPT_GRAPH_END

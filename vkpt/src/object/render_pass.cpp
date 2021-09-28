@@ -78,7 +78,7 @@ Framebuffer RenderPass::createFramebuffer(
         .layers          = 1
     };
 
-    auto device = image_views[0].getImage().getDescription().device;
+    auto device = image_views[0].getImage().getDevice();
     auto framebuffer = device.createFramebufferUnique(create_info);
 
     FramebufferDescription description = {
