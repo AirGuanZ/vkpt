@@ -187,14 +187,6 @@ void Graph::waitBeforeFirstUsage(
     buffer_waits_.insert({ buffer, semaphore });
 }
 
-void Graph::waitBeforeFirstUsage(
-    const ImageSubresource &image_subrsc,
-    Semaphore               semaphore)
-{
-    assert(!image_waits_.contains(image_subrsc));
-    image_waits_.insert({ image_subrsc, semaphore });
-}
-
 void Graph::signalAfterLastUsage(
     const Buffer &buffer,
     Semaphore     semaphore,
@@ -208,17 +200,151 @@ void Graph::signalAfterLastUsage(
     });
 }
 
-void Graph::signalAfterLastUsage(
-    const ImageSubresource &image_subrsc,
-    Semaphore               semaphore,
-    const Queue            *next_queue,
-    vk::ImageLayout         next_layout,
-    bool                    release_only)
+void Graph::waitBeforeFirstUsage(
+    const Image                &image,
+    const vk::ImageSubresource &subrsc,
+    Semaphore                   semaphore)
 {
+    ImageSubresource image_subrsc = { image, subrsc };
+    assert(!image_waits_.contains(image_subrsc));
+    image_waits_.insert({ image_subrsc, semaphore });
+}
+
+void Graph::waitBeforeFirstUsage(const Image &image, Semaphore semaphore)
+{
+    auto &desc = image.getDescription();
+    
+    const bool has_depth   = hasDepthAspect(desc.format);
+    const bool has_stencil = hasStencilAspect(desc.format);
+    const bool has_color   = !has_depth && !has_stencil;
+
+    if(has_depth)
+    {
+        waitBeforeFirstUsage(
+            image, vk::ImageAspectFlagBits::eDepth, semaphore);
+    }
+
+    if(has_stencil)
+    {
+        waitBeforeFirstUsage(
+            image, vk::ImageAspectFlagBits::eStencil, semaphore);
+    }
+
+    if(has_color)
+    {
+        waitBeforeFirstUsage(
+            image, vk::ImageAspectFlagBits::eColor, semaphore);
+    }
+}
+
+void Graph::waitBeforeFirstUsage(
+    const Image &image, vk::ImageAspectFlags aspect, Semaphore semaphore)
+{
+    auto &desc = image.getDescription();
+    waitBeforeFirstUsage(
+        image, vk::ImageSubresourceRange{
+            .aspectMask     = aspect,
+            .baseMipLevel   = 0,
+            .levelCount     = desc.mip_levels,
+            .baseArrayLayer = 0,
+            .layerCount     = desc.array_layers
+        }, semaphore);
+}
+
+void Graph::waitBeforeFirstUsage(
+    const Image                     &image,
+    const vk::ImageSubresourceRange &range,
+    Semaphore                        semaphore)
+{
+    foreachSubrsc(range, [&](const vk::ImageSubresource &subrsc)
+    {
+        waitBeforeFirstUsage(image, subrsc, semaphore);
+    });
+}
+
+void Graph::signalAfterLastUsage(
+    const Image                &image,
+    const vk::ImageSubresource &subrsc,
+    Semaphore                   semaphore,
+    const Queue                *next_queue,
+    vk::ImageLayout             next_layout,
+    bool                        release_only)
+{
+    ImageSubresource image_subrsc = { image, subrsc };
     assert(!image_signals_.contains(image_subrsc));
     image_signals_.insert({
         image_subrsc,
         { semaphore, next_queue, next_layout, release_only }
+    });
+}
+
+void Graph::signalAfterLastUsage(
+    const Image    &image,
+    Semaphore       semaphore,
+    const Queue    *next_queue,
+    vk::ImageLayout next_layout,
+    bool            release_only)
+{
+    auto &desc = image.getDescription();
+    
+    const bool has_depth   = hasDepthAspect(desc.format);
+    const bool has_stencil = hasStencilAspect(desc.format);
+    const bool has_color   = !has_depth && !has_stencil;
+
+    if(has_depth)
+    {
+        signalAfterLastUsage(
+            image, vk::ImageAspectFlagBits::eDepth, semaphore,
+            next_queue, next_layout, release_only);
+    }
+
+    if(has_stencil)
+    {
+        signalAfterLastUsage(
+            image, vk::ImageAspectFlagBits::eStencil, semaphore,
+            next_queue, next_layout, release_only);
+    }
+
+    if(has_color)
+    {
+        signalAfterLastUsage(
+            image, vk::ImageAspectFlagBits::eColor, semaphore,
+            next_queue, next_layout, release_only);
+    }
+}
+
+void Graph::signalAfterLastUsage(
+    const Image         &image,
+    vk::ImageAspectFlags aspect,
+    Semaphore            semaphore,
+    const Queue         *next_queue,
+    vk::ImageLayout      next_layout,
+    bool                 release_only)
+{
+    auto &desc = image.getDescription();
+    const vk::ImageSubresourceRange range = {
+        .aspectMask     = aspect,
+        .baseMipLevel   = 0,
+        .levelCount     = desc.mip_levels,
+        .baseArrayLayer = 0,
+        .layerCount     = desc.array_layers
+    };
+    signalAfterLastUsage(
+        image, range, semaphore, next_queue, next_layout, release_only);
+}
+
+void Graph::signalAfterLastUsage(
+    const Image                     &image,
+    const vk::ImageSubresourceRange &range,
+    Semaphore                        semaphore,
+    const Queue                     *next_queue,
+    vk::ImageLayout                  next_layout,
+    bool                             release_only)
+{
+    foreachSubrsc(range, [&](const vk::ImageSubresource &subrsc)
+    {
+        signalAfterLastUsage(
+            image, subrsc, semaphore, next_queue, next_layout, release_only);
     });
 }
 

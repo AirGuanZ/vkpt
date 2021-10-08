@@ -35,4 +35,12 @@ constexpr ResourceUsage USAGE_RENDER_TARGET = ResourceUsage{
     .layout = vk::ImageLayout::eColorAttachmentOptimal
 };
 
+constexpr ResourceUsage USAGE_DEPTH_STENCIL = ResourceUsage{
+    .stages = vk::PipelineStageFlagBits2KHR::eEarlyFragmentTests | vk::PipelineStageFlagBits2KHR::eLateFragmentTests,
+    .access = vk::AccessFlagBits2KHR::eDepthStencilAttachmentRead | vk::AccessFlagBits2KHR::eDepthStencilAttachmentWrite,
+    .layout = vk::ImageLayout::eDepthAttachmentOptimal
+};
+
+// TODO: more usages
+
 VKPT_GRAPH_END

@@ -5,8 +5,6 @@
 #include <vkpt/context.h>
 #include <vkpt/utility/vertex.h>
 
-#include "vkpt/graph/compiler.h"
-
 using namespace vkpt;
 
 VKPT_VERTEX_BEGIN(Vertex)
@@ -159,24 +157,15 @@ void run()
 
         rg::Graph graph;
 
-        auto image_subrsc = ImageSubresource{
-            context.getImage(),
-            vk::ImageSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .mipLevel   = 0,
-                .arrayLayer = 0
-            }
-        };
-
         graph.waitBeforeFirstUsage(
-            image_subrsc, context.getImageAvailableSemaphore());
+            context.getImage(), context.getImageAvailableSemaphore());
 
         graph.signalAfterLastUsage(
-            image_subrsc, context.getPresentAvailableSemaphore(),
+            context.getImage(), context.getPresentAvailableSemaphore(),
             context.getPresentQueue(), vk::ImageLayout::ePresentSrcKHR, false);
 
         auto triangle_pass = graph.addPass(context.getGraphicsQueue());
-        triangle_pass->use(image_subrsc.image, rg::USAGE_RENDER_TARGET);
+        triangle_pass->use(context.getImage(), rg::USAGE_RENDER_TARGET);
         triangle_pass->setCallback([&](rg::PassContext &pass_context)
         {
             auto command_buffer = pass_context.getCommandBuffer();

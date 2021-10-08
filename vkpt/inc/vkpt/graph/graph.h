@@ -139,17 +139,56 @@ public:
         Semaphore     semaphore,
         const Queue  *next_queue,
         bool          release_only);
+    
+    void waitBeforeFirstUsage(
+        const Image                &image,
+        const vk::ImageSubresource &subrsc,
+        Semaphore                   semaphore);
+    
+    void waitBeforeFirstUsage(
+        const Image                     &image,
+        const vk::ImageSubresourceRange &range,
+        Semaphore                        semaphore);
 
     void waitBeforeFirstUsage(
-        const ImageSubresource &image_subrsc,
-        Semaphore               wait_semaphore);
+        const Image         &image,
+        vk::ImageAspectFlags aspect,
+        Semaphore            semaphore);
+
+    void waitBeforeFirstUsage(
+        const Image &image,
+        Semaphore    semaphore);
 
     void signalAfterLastUsage(
-        const ImageSubresource &image_subrsc,
-        Semaphore               semaphore,
-        const Queue            *next_queue,
-        vk::ImageLayout         next_layout,
-        bool                    release_only);
+        const Image                &image,
+        const vk::ImageSubresource &subrsc,
+        Semaphore                   semaphore,
+        const Queue                *next_queue,
+        vk::ImageLayout             next_layout,
+        bool                        release_only);
+
+    void signalAfterLastUsage(
+        const Image                     &image,
+        const vk::ImageSubresourceRange &range,
+        Semaphore                        semaphore,
+        const Queue                     *next_queue,
+        vk::ImageLayout                  next_layout,
+        bool                             release_only);
+
+    void signalAfterLastUsage(
+        const Image         &image,
+        vk::ImageAspectFlags aspect,
+        Semaphore            semaphore,
+        const Queue         *next_queue,
+        vk::ImageLayout      next_layout,
+        bool                 release_only);
+
+    void signalAfterLastUsage(
+        const Image     &image,
+        Semaphore        semaphore,
+        const Queue     *next_queue,
+        vk::ImageLayout  next_layout,
+        bool             release_only);
 
     template<typename...Args>
     void addDependency(Args...passes);

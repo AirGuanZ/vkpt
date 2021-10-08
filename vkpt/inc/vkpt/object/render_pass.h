@@ -5,6 +5,8 @@
 
 VKPT_BEGIN
 
+// TODO: support multiple subpasses and resolve attachments
+
 struct Attachment
 {
     vk::Format              format;
