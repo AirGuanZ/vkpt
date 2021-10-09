@@ -4,7 +4,7 @@
 
 VKPT_BEGIN
 
-class PerFrameFences : public agz::misc::uncopyable_t, public FenceAllocator
+class PerFrameFences : public FenceAllocator, public agz::misc::uncopyable_t
 {
 public:
 

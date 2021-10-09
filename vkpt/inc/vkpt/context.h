@@ -4,6 +4,7 @@
 
 #include <vkpt/allocator/resource_allocator.h>
 #include <vkpt/frame/frame_resources.h>
+#include <vkpt/frame/transient_images.h>
 #include <vkpt/graph/graph.h>
 #include <vkpt/object/pipeline.h>
 #include <vkpt/object/queue.h>
@@ -62,6 +63,8 @@ public:
     void swapBuffers();
 
     FrameResources createFrameResources();
+
+    TransientImages createTransientImages();
 
     // window events
 

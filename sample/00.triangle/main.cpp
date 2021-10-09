@@ -1,11 +1,14 @@
 #include <iostream>
 
+#include <vkpt/frame/transient_images.h>
 #include <vkpt/graph/graph.h>
 #include <vkpt/object/pipeline.h>
 #include <vkpt/context.h>
 #include <vkpt/utility/vertex.h>
 
 using namespace vkpt;
+
+constexpr auto SAMPLE_COUNT = vk::SampleCountFlagBits::e4;
 
 VKPT_VERTEX_BEGIN(Vertex)
     VKPT_MEMBER(Vec3f, position)
@@ -23,13 +26,35 @@ Pipeline createPipeline(Context &context)
             .source_name = "./asset/fragment.glsl",
             .entry_name = "main"
         },
-        .render_pass = std::vector{
-            Attachment{
-                .format   = context.getImageFormat(),
-                .samples  = vk::SampleCountFlagBits::e1,
-                .load_op  = vk::AttachmentLoadOp::eClear,
-                .store_op = vk::AttachmentStoreOp::eStore,
-                .layout   = vk::ImageLayout::eColorAttachmentOptimal
+        .render_pass = RenderPassDescription{
+            .attachments = std::vector<vk::AttachmentDescription>{
+                {
+                    .format         = context.getImageFormat(),
+                    .samples        = vk::SampleCountFlagBits::e1,
+                    .loadOp         = vk::AttachmentLoadOp::eDontCare,
+                    .storeOp        = vk::AttachmentStoreOp::eStore,
+                    .stencilLoadOp  = vk::AttachmentLoadOp::eDontCare,
+                    .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+                    .initialLayout  = vk::ImageLayout::eColorAttachmentOptimal,
+                    .finalLayout    = vk::ImageLayout::eColorAttachmentOptimal
+                },
+                {
+                    .format         = context.getImageFormat(),
+                    .samples        = SAMPLE_COUNT,
+                    .loadOp         = vk::AttachmentLoadOp::eClear,
+                    .storeOp        = vk::AttachmentStoreOp::eDontCare,
+                    .stencilLoadOp  = vk::AttachmentLoadOp::eDontCare,
+                    .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+                    .initialLayout  = vk::ImageLayout::eColorAttachmentOptimal,
+                    .finalLayout    = vk::ImageLayout::eColorAttachmentOptimal
+                }
+            },
+            .subpasses = std::vector<SubpassDescription>{
+                {
+                    .bind_point          = vk::PipelineBindPoint::eGraphics,
+                    .color_attachments   = { { 1, vk::ImageLayout::eColorAttachmentOptimal } },
+                    .resolve_attachments = { { 0, vk::ImageLayout::eColorAttachmentOptimal } }
+                }
             }
         },
         .layout = {},
@@ -52,7 +77,7 @@ Pipeline createPipeline(Context &context)
             .lineWidth               = 1
         },
         .multisample = {
-            .rasterizationSamples = vk::SampleCountFlagBits::e1,
+            .rasterizationSamples = SAMPLE_COUNT,
             .sampleShadingEnable  = false,
             .minSampleShading     = 1
         },
@@ -73,13 +98,15 @@ Pipeline createPipeline(Context &context)
 }
 
 std::vector<Framebuffer> createFramebuffers(
-    Context &context, const Pipeline &pipeline)
+    Context        &context,
+    const Pipeline &pipeline,
+    ImageView       color_render_target_view)
 {
     std::vector<Framebuffer> result;
     for(uint32_t i = 0; i < context.getImageCount(); ++i)
     {
-        result.push_back(pipeline.getRenderPass()
-            .createFramebuffer({ context.getImageView(i) }));
+        result.push_back(pipeline.getRenderPass().createFramebuffer(
+            { context.getImageView(i), color_render_target_view }));
     }
     return result;
 }
@@ -110,6 +137,43 @@ Buffer createTriangleVertexBuffer(Context &context)
     return buffer;
 }
 
+ImageView createColorRenderTarget(Context &context)
+{
+    auto color_render_target = context.getResourceAllocator().createImage(
+        vk::ImageCreateInfo{
+            .imageType = vk::ImageType::e2D,
+            .format    = context.getImageFormat(),
+            .extent    = {
+                context.getFramebufferSizeX(),
+                context.getFramebufferSizeY(),
+                1
+            },
+            .mipLevels     = 1,
+            .arrayLayers   = 1,
+            .samples       = SAMPLE_COUNT,
+            .usage         = vk::ImageUsageFlagBits::eColorAttachment,
+            .sharingMode   = vk::SharingMode::eExclusive,
+            .initialLayout = vk::ImageLayout::eUndefined
+        }, vma::MemoryUsage::eGPUOnly);
+
+    auto color_render_target_view = color_render_target.createView(
+        vk::ImageViewType::e2D,
+        vk::ImageSubresourceRange{
+            .aspectMask     = vk::ImageAspectFlagBits::eColor,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        },
+        vk::ComponentMapping{
+            .r = vk::ComponentSwizzle::eIdentity,
+            .g = vk::ComponentSwizzle::eIdentity,
+            .b = vk::ComponentSwizzle::eIdentity,
+            .a = vk::ComponentSwizzle::eIdentity,
+        });
+    return color_render_target_view;
+}
+
 void run()
 {
     Context context(Context::Description{
@@ -121,16 +185,22 @@ void run()
     });
 
     auto frame_resources = context.createFrameResources();
-    
+
     auto pipeline = createPipeline(context);
-    auto framebuffers = createFramebuffers(context, pipeline);
+    auto color_render_target = createColorRenderTarget(context);
+    auto framebuffers = createFramebuffers(
+        context, pipeline, color_render_target);
 
     auto vertex_buffer = createTriangleVertexBuffer(context);
 
     context.attach([&](const RecreateSwapchain &e)
     {
         if(!context.isMinimized())
-            framebuffers = createFramebuffers(context, pipeline);
+        {
+            color_render_target = createColorRenderTarget(context);
+            framebuffers = createFramebuffers(
+                context, pipeline, color_render_target);
+        }
     });
 
     auto &imgui = context.getImGuiIntegration();
@@ -166,13 +236,17 @@ void run()
 
         auto triangle_pass = graph.addPass(context.getGraphicsQueue());
         triangle_pass->use(context.getImage(), rg::USAGE_RENDER_TARGET);
+        triangle_pass->use(color_render_target.getImage(), rg::USAGE_RENDER_TARGET);
         triangle_pass->setCallback([&](rg::PassContext &pass_context)
         {
             auto command_buffer = pass_context.getCommandBuffer();
 
             command_buffer.beginPipeline(
                 pipeline, framebuffers[context.getImageIndex()],
-                { vk::ClearColorValue{ std::array{ 0.0f, 0.0f, 0.0f, 0.0f } } });
+                {
+                    vk::ClearColorValue{ std::array{ 0.0f, 0.0f, 0.0f, 0.0f } },
+                    vk::ClearColorValue{ std::array{ 0.0f, 0.0f, 0.0f, 0.0f } }
+                });
 
             command_buffer.setViewport(
                 { context.getDefaultFramebufferViewport() });

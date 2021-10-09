@@ -262,6 +262,11 @@ FrameResources Context::createFrameResources()
         &graphics_queue_, &compute_queue_, &transfer_queue_, &present_queue_);
 }
 
+TransientImages Context::createTransientImages()
+{
+    return TransientImages(resource_allocator_, image_count_);
+}
+
 void Context::doEvents()
 {
     glfwPollEvents();

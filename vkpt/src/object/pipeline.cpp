@@ -74,14 +74,21 @@ Pipeline Pipeline::build(vk::Device device, const PipelineDescription &desc)
 
     RenderPass render_pass;
 
-    if(auto desc_attachments = desc.render_pass.as_if<std::vector<Attachment>>())
+    desc.render_pass.match(
+        [&](const std::vector<vk::AttachmentDescription> &attachments)
     {
         render_pass = RenderPass::build(device, RenderPassDescription{
-            .attachments = *desc_attachments
-            });
-    }
-    else
-        render_pass = desc.render_pass.as<RenderPass>();
+            .attachments = attachments
+        });
+    },
+        [&](const RenderPassDescription &render_pass_desc)
+    {
+        render_pass = RenderPass::build(device, render_pass_desc);
+    },
+        [&](const RenderPass &pass)
+    {
+        render_pass = pass;
+    });
 
     // pipeline layout
 
@@ -175,6 +182,7 @@ Pipeline Pipeline::build(vk::Device device, const PipelineDescription &desc)
 
     auto result = Pipeline(
         std::move(pipeline),
+        desc,
         std::move(pipeline_layout),
         std::move(render_pass),
         desc.layout.set_layouts);
@@ -182,14 +190,12 @@ Pipeline Pipeline::build(vk::Device device, const PipelineDescription &desc)
     return result;
 }
 
-Pipeline::operator bool() const
+void Pipeline::reset()
 {
-    return pipeline_.get();
-}
-
-vk::Pipeline Pipeline::getPipeline() const
-{
-    return pipeline_.get();
+    Object::reset();
+    layout_.reset();
+    render_pass_.reset();
+    set_layouts_.clear();
 }
 
 const RenderPass &Pipeline::getRenderPass() const
@@ -204,15 +210,16 @@ Framebuffer Pipeline::createFramebuffer(std::vector<ImageView> image_views)
 
 Pipeline::Pipeline(
     vk::UniquePipeline               pipeline,
+    const PipelineDescription &desc,
     vk::UniquePipelineLayout         layout,
     RenderPass                       render_pass,
     std::vector<DescriptorSetLayout> set_layouts)
-    : pipeline_(std::move(pipeline)),
-      layout_(std::move(layout)),
+    : Base(std::move(pipeline), desc),
+      layout_(std::make_shared<vk::UniquePipelineLayout>(std::move(layout))),
       render_pass_(std::move(render_pass)),
       set_layouts_(std::move(set_layouts))
 {
-    
+
 }
 
 VKPT_END

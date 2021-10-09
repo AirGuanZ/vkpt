@@ -7,20 +7,21 @@ VKPT_BEGIN
 
 // TODO: support multiple subpasses and resolve attachments
 
-struct Attachment
+struct SubpassDescription
 {
-    vk::Format              format;
-    vk::SampleCountFlagBits samples;
-    vk::AttachmentLoadOp    load_op;
-    vk::AttachmentStoreOp   store_op;
-    vk::AttachmentLoadOp    stencil_load_op = vk::AttachmentLoadOp::eDontCare;
-    vk::AttachmentStoreOp   stencil_store_op = vk::AttachmentStoreOp::eDontCare;
-    vk::ImageLayout         layout;
+    vk::PipelineBindPoint                  bind_point;
+    std::vector<vk::AttachmentReference>   input_attachments;
+    std::vector<vk::AttachmentReference>   color_attachments;
+    std::vector<vk::AttachmentReference>   resolve_attachments;
+    std::optional<vk::AttachmentReference> depth_stencil_attachments;
+    std::vector<uint32_t>                  preserve_attachments;
 };
 
 struct RenderPassDescription
 {
-    std::vector<Attachment> attachments;
+    std::vector<vk::AttachmentDescription> attachments;
+    std::vector<SubpassDescription>        subpasses;
+    std::vector<vk::SubpassDependency>     dependencies;
 };
 
 class RenderPass :

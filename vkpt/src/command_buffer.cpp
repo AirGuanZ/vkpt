@@ -56,7 +56,7 @@ void CommandBuffer::beginPipeline(
         .pClearValues    = clear_values.data()
     }, vk::SubpassContents::eInline);
 
-    impl_.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.getPipeline());
+    impl_.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.get());
 }
 
 void CommandBuffer::endPipeline()

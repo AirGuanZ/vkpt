@@ -4,9 +4,6 @@ VKPT_GRAPH_BEGIN
 
 void PassContext::newCommandBuffer()
 {
-    assert(!command_buffers_.empty());
-    command_buffers_.back().commandBuffer.end();
-
     auto new_command_buffer =
         command_buffer_allocator_.newCommandBuffer(queue_type_);
     new_command_buffer.begin(true);

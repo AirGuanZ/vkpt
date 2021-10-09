@@ -32,7 +32,8 @@ struct PipelineDescription
         vk::PipelineShaderStageCreateInfo>;
 
     using InternalRenderPass = agz::misc::variant_t<
-        std::vector<Attachment>,
+        std::vector<vk::AttachmentDescription>,
+        RenderPassDescription,
         RenderPass>;
 
     vk::PipelineCreateFlags flags = {};
@@ -62,7 +63,8 @@ struct PipelineDescription
     std::vector<vk::DynamicState> dynamic_states;
 };
 
-class Pipeline : public agz::misc::uncopyable_t
+class Pipeline : public Object<
+    vk::Pipeline, vk::UniquePipeline, PipelineDescription>
 {
 public:
 
@@ -74,9 +76,15 @@ public:
 
     Pipeline &operator=(Pipeline &&other) noexcept = default;
 
-    operator bool() const;
+    using Object::operator vk::Pipeline;
 
-    vk::Pipeline getPipeline() const;
+    using Object::operator bool;
+
+    using Object::get;
+
+    using Object::getDescription;
+
+    void reset();
 
     const RenderPass &getRenderPass() const;
 
@@ -84,16 +92,19 @@ public:
 
 private:
 
+    using Base = Object<
+        vk::Pipeline, vk::UniquePipeline, PipelineDescription>;
+
     Pipeline(
         vk::UniquePipeline               pipeline,
+        const PipelineDescription       &desc,
         vk::UniquePipelineLayout         layout,
         RenderPass                       render_pass,
         std::vector<DescriptorSetLayout> set_layouts);
-
-    vk::UniquePipeline               pipeline_;
-    vk::UniquePipelineLayout         layout_;
-    RenderPass                       render_pass_;
-    std::vector<DescriptorSetLayout> set_layouts_;
+    
+    std::shared_ptr<vk::UniquePipelineLayout> layout_;
+    RenderPass                                render_pass_;
+    std::vector<DescriptorSetLayout>          set_layouts_;
 };
 
 VKPT_END

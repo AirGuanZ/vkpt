@@ -5,53 +5,74 @@ VKPT_BEGIN
 RenderPass RenderPass::build(
     vk::Device device, RenderPassDescription desc)
 {
-    std::vector<vk::AttachmentDescription> attachments;
-    std::vector<vk::AttachmentReference>   color_references;
-    vk::AttachmentReference                depth_stencil_reference;
-    
-    for(auto &a : desc.attachments)
+    if(desc.subpasses.empty())
     {
-        const uint32_t index = static_cast<uint32_t>(attachments.size());
+        assert(desc.dependencies.empty());
 
-        attachments.push_back(vk::AttachmentDescription{
-            .format         = a.format,
-            .samples        = a.samples,
-            .loadOp         = a.load_op,
-            .storeOp        = a.store_op,
-            .stencilLoadOp  = a.stencil_load_op,
-            .stencilStoreOp = a.stencil_store_op,
-            .initialLayout  = a.layout,
-            .finalLayout    = a.layout
-        });
+        std::vector<vk::AttachmentReference>   color_references;
+        vk::AttachmentReference                depth_stencil_reference;
 
-        auto attachment_reference = vk::AttachmentReference{
-            .attachment = index,
-            .layout     = a.layout
+        uint32_t index = 0;
+        for(auto &a : desc.attachments)
+        {
+            auto attachment_reference = vk::AttachmentReference{
+                .attachment = index++,
+                .layout     = a.initialLayout
+            };
+            if(isDepthStencilFormat(a.format))
+                depth_stencil_reference = attachment_reference;
+            else
+                color_references.push_back(attachment_reference);
+        }
+
+        vk::SubpassDescription subpass_desc = {
+            .pipelineBindPoint       = vk::PipelineBindPoint::eGraphics,
+            .colorAttachmentCount    = static_cast<uint32_t>(color_references.size()),
+            .pColorAttachments       = color_references.data(),
+            .pDepthStencilAttachment =
+                color_references.size() == desc.attachments.size() ?
+                nullptr : &depth_stencil_reference
         };
 
-        if(isDepthStencilFormat(a.format))
-            depth_stencil_reference = attachment_reference;
-        else
-            color_references.push_back(attachment_reference);
+        vk::RenderPassCreateInfo render_pass_create_info = {
+            .attachmentCount = static_cast<uint32_t>(desc.attachments.size()),
+            .pAttachments    = desc.attachments.data(),
+            .subpassCount    = 1,
+            .pSubpasses      = &subpass_desc
+        };
+
+        auto render_pass = device.createRenderPassUnique(render_pass_create_info);
+        return RenderPass(std::move(render_pass), std::move(desc));
     }
 
-    vk::SubpassDescription subpass_desc = {
-        .pipelineBindPoint       = vk::PipelineBindPoint::eGraphics,
-        .colorAttachmentCount    = static_cast<uint32_t>(color_references.size()),
-        .pColorAttachments       = color_references.data(),
-        .pDepthStencilAttachment =
-            color_references.size() == attachments.size() ?
-            nullptr : &depth_stencil_reference
-    };
+    std::vector<vk::SubpassDescription> subpasses;
+    subpasses.reserve(desc.subpasses.size());
 
-    vk::RenderPassCreateInfo render_pass_create_info = {
-        .attachmentCount = static_cast<uint32_t>(attachments.size()),
-        .pAttachments    = attachments.data(),
-        .subpassCount    = 1,
-        .pSubpasses      = &subpass_desc
-    };
+    for(auto &s : desc.subpasses)
+    {
+        subpasses.push_back(vk::SubpassDescription{
+            .flags                   = {},
+            .pipelineBindPoint       = s.bind_point,
+            .inputAttachmentCount    = static_cast<uint32_t>(s.input_attachments.size()),
+            .pInputAttachments       = s.input_attachments.data(),
+            .colorAttachmentCount    = static_cast<uint32_t>(s.color_attachments.size()),
+            .pColorAttachments       = s.color_attachments.data(),
+            .pResolveAttachments     = s.resolve_attachments.data(),
+            .pDepthStencilAttachment = s.depth_stencil_attachments ? &*s.depth_stencil_attachments : nullptr,
+            .preserveAttachmentCount = static_cast<uint32_t>(s.preserve_attachments.size()),
+            .pPreserveAttachments    = s.preserve_attachments.data()
+        });
+    }
 
-    auto render_pass = device.createRenderPassUnique(render_pass_create_info);
+    auto render_pass = device.createRenderPassUnique(vk::RenderPassCreateInfo{
+        .flags           = {},
+        .attachmentCount = static_cast<uint32_t>(desc.attachments.size()),
+        .pAttachments    = desc.attachments.data(),
+        .subpassCount    = static_cast<uint32_t>(subpasses.size()),
+        .pSubpasses      = subpasses.data(),
+        .dependencyCount = static_cast<uint32_t>(desc.dependencies.size()),
+        .pDependencies   = desc.dependencies.data()
+    });
     return RenderPass(std::move(render_pass), std::move(desc));
 }
 

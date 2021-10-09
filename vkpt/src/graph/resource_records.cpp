@@ -29,8 +29,8 @@ void ResourceRecords::build(std::span<CompilePass*> sorted_passes)
                 .pass       = pass,
                 .stages     = usage.stages,
                 .access     = usage.access,
-                .end_stages = usage.stages,
-                .end_access = usage.access
+                .end_stages = usage.end_stages,
+                .end_access = usage.end_access
             });
         }
 
@@ -44,9 +44,9 @@ void ResourceRecords::build(std::span<CompilePass*> sorted_passes)
                 .stages     = usage.stages,
                 .access     = usage.access,
                 .layout     = usage.layout,
-                .end_stages = usage.stages,
-                .end_access = usage.access,
-                .end_layout = usage.layout
+                .end_stages = usage.end_stages,
+                .end_access = usage.end_access,
+                .end_layout = usage.end_layout
             });
         }
     }

@@ -267,9 +267,27 @@ void Compiler::processUnwaitedFirstUsage(const Rsc &resource)
 
     const ResourceState &state = resource.getState();
     state.match(
-        [&](const FreeState &)
+        [&](const FreeState &s)
     {
-
+        if constexpr(!is_buffer)
+        {
+            if(s.layout != first_usage.layout)
+            {
+                first_pass->pre_ext_image_barriers.insert(
+                    vk::ImageMemoryBarrier2KHR{
+                        .srcStageMask        = vk::PipelineStageFlagBits2KHR::eBottomOfPipe,
+                        .srcAccessMask       = vk::AccessFlagBits2KHR::eNone,
+                        .dstStageMask        = first_usage.stages,
+                        .dstAccessMask       = first_usage.access,
+                        .oldLayout           = s.layout,
+                        .newLayout           = first_usage.layout,
+                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .image               = resource.get(),
+                        .subresourceRange    = subrscToRange(resource.subrsc)
+                    });
+            }
+        }
     },
         [&](const UsingState &s)
     {

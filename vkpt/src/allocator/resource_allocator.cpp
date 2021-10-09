@@ -155,6 +155,7 @@ Image ResourceAllocator::createImage(
 
 void ResourceAllocator::swap(ResourceAllocator &other) noexcept
 {
+    std::swap(device_, other.device_);
     std::swap(allocator_, other.allocator_);
 }
 

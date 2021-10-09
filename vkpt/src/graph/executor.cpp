@@ -82,6 +82,8 @@ void Executor::record(
                     pass.post_image_barriers);
             }
         }
+
+        context.getCommandBuffer().end();
     }
 
     for(auto &[buffer, state] : graph.buffer_final_states)
@@ -102,8 +104,6 @@ void Executor::submit()
     for(auto &result : group_results_)
     {
         auto &group = *result.group;
-
-        result.command_buffers.back().commandBuffer.end();
 
         group.queue->submit(
             group.wait_semaphores,
