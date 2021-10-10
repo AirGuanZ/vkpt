@@ -28,9 +28,7 @@ void ResourceRecords::build(std::span<CompilePass*> sorted_passes)
             compile_buffer.usages.push_back(CompileBufferUsage{
                 .pass       = pass,
                 .stages     = usage.stages,
-                .access     = usage.access,
-                .end_stages = usage.end_stages,
-                .end_access = usage.end_access
+                .access     = usage.access
             });
         }
 
@@ -40,13 +38,11 @@ void ResourceRecords::build(std::span<CompilePass*> sorted_passes)
                 image_subrsc, create_compile_image).first->second;
 
             compile_image.usages.push_back(CompileImageUsage{
-                .pass       = pass,
-                .stages     = usage.stages,
-                .access     = usage.access,
-                .layout     = usage.layout,
-                .end_stages = usage.end_stages,
-                .end_access = usage.end_access,
-                .end_layout = usage.end_layout
+                .pass        = pass,
+                .stages      = usage.stages,
+                .access      = usage.access,
+                .layout      = usage.layout,
+                .exit_layout = usage.exit_layout
             });
         }
     }

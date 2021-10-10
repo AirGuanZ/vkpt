@@ -35,6 +35,8 @@ private:
     template<typename Rsc>
     void processUnsignaledFinalState(const Rsc &rsc);
 
+    void mergeNeighboringReadOnlyUsages();
+
     void mergeGeneratedPreAndPostPasses();
 
     template<bool Reverse>

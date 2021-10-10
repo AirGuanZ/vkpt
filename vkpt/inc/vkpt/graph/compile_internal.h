@@ -87,8 +87,6 @@ struct CompileBufferUsage
     CompilePass               *pass;
     vk::PipelineStageFlags2KHR stages;
     vk::AccessFlags2KHR        access;
-    vk::PipelineStageFlags2KHR end_stages;
-    vk::AccessFlags2KHR        end_access;
 
     operator Pass::BufferUsage() const;
 };
@@ -99,9 +97,7 @@ struct CompileImageUsage
     vk::PipelineStageFlags2KHR stages;
     vk::AccessFlags2KHR        access;
     vk::ImageLayout            layout;
-    vk::PipelineStageFlags2KHR end_stages;
-    vk::AccessFlags2KHR        end_access;
-    vk::ImageLayout            end_layout;
+    vk::ImageLayout            exit_layout;
 
     operator Pass::ImageUsage() const;
 };

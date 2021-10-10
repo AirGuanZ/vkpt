@@ -44,9 +44,6 @@ public:
     {
         vk::PipelineStageFlags2KHR stages;
         vk::AccessFlags2KHR        access;
-
-        vk::PipelineStageFlags2KHR end_stages;
-        vk::AccessFlags2KHR        end_access;
     };
 
     struct ImageUsage
@@ -54,10 +51,7 @@ public:
         vk::PipelineStageFlags2KHR stages;
         vk::AccessFlags2KHR        access;
         vk::ImageLayout            layout;
-
-        vk::PipelineStageFlags2KHR end_stages;
-        vk::AccessFlags2KHR        end_access;
-        vk::ImageLayout            end_layout;
+        vk::ImageLayout            exit_layout;
     };
 
     PassBase() = default;
@@ -81,6 +75,12 @@ public:
     const List<vk::Fence> &_getFences() const { return fences_; }
 
 protected:
+
+    void clearBufferUsages();
+
+    void clearImageUsages();
+
+    void clearFences();
 
     void addBufferUsage(const Buffer &buffer, const BufferUsage &usage);
 
@@ -114,29 +114,28 @@ public:
         const Image                &image,
         const vk::ImageSubresource &subrsc,
         const ResourceUsage        &usage,
-        const ResourceUsage        &exit_usage = USAGE_NIL);
+        vk::ImageLayout             exit_layout = vk::ImageLayout::eUndefined);
     
     void use(
         const Image         &image,
         const ResourceUsage &usage,
-        const ResourceUsage &exit_usage = USAGE_NIL);
+        vk::ImageLayout      exit_layout = vk::ImageLayout::eUndefined);
     
     void use(
         const Image         &image,
         vk::ImageAspectFlags aspect,
         const ResourceUsage &usage,
-        const ResourceUsage &exit_usage = USAGE_NIL);
+        vk::ImageLayout      exit_layout = vk::ImageLayout::eUndefined);
     
     void use(
         const Image                     &image,
         const vk::ImageSubresourceRange &range,
         const ResourceUsage             &usage,
-        const ResourceUsage             &exit_usage = USAGE_NIL);
+        vk::ImageLayout                 exit_layout = vk::ImageLayout::eUndefined);
 
     void use(
         const Buffer        &buffer,
-        const ResourceUsage &usage,
-        const ResourceUsage &exit_usage = USAGE_NIL);
+        const ResourceUsage &usage);
 
     void signal(vk::Fence fence);
 

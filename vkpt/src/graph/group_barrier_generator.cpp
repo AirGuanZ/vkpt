@@ -1,4 +1,5 @@
 #include <vkpt/graph/group_barrier_generator.h>
+#include <vkpt/graph/group_barrier_optimizer.h>
 
 VKPT_GRAPH_BEGIN
 
@@ -57,6 +58,23 @@ CompilePass *GroupBarrierGenerator::getBarrierPass(CompilePass *A, CompilePass *
     return last_pass_with_pre_barrier_;
 }
 
+bool GroupBarrierGenerator::shouldSkipBarrier(
+    const Pass::BufferUsage &a, const Pass::BufferUsage &b) const
+{
+    return a.stages == b.stages &&
+           a.access == b.access &&
+           GroupBarrierOptimizer::isReadOnly(a.access);
+}
+
+bool GroupBarrierGenerator::shouldSkipBarrier(
+    const Pass::ImageUsage &a, const Pass::ImageUsage &b) const
+{
+    return a.exit_layout == b.layout &&
+           a.stages == b.stages &&
+           a.access == b.access &&
+           GroupBarrierOptimizer::isReadOnly(a.access);
+}
+
 template<typename Resource, typename PassUsage>
 void GroupBarrierGenerator::handleResource(
     CompilePass *pass, const Resource &rsc, const PassUsage &usage)
@@ -80,38 +98,41 @@ void GroupBarrierGenerator::handleResource(
             pass->sorted_index_in_group);
         auto barrier_pass = getBarrierPass(last_user, pass);
 
-        if constexpr(is_buffer)
+        if(!shouldSkipBarrier(last_usage, usage))
         {
-            barrier_pass->pre_buffer_barriers.insert({
-                rsc, vk::BufferMemoryBarrier2KHR{
-                    .srcStageMask        = last_usage.end_stages,
-                    .srcAccessMask       = last_usage.end_access,
-                    .dstStageMask        = usage.stages,
-                    .dstAccessMask       = usage.access,
-                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .buffer              = rsc.get(),
-                    .offset              = 0,
-                    .size                = VK_WHOLE_SIZE
-                }
-            });
-        }
-        else
-        {
-            barrier_pass->pre_image_barriers.insert({
-                rsc, vk::ImageMemoryBarrier2KHR{
-                    .srcStageMask        = last_usage.end_stages,
-                    .srcAccessMask       = last_usage.end_access,
-                    .dstStageMask        = usage.stages,
-                    .dstAccessMask       = usage.access,
-                    .oldLayout           = last_usage.end_layout,
-                    .newLayout           = usage.layout,
-                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .image               = rsc.image.get(),
-                    .subresourceRange    = subrscToRange(rsc.subrsc)
-                }
-            });
+            if constexpr(is_buffer)
+            {
+                barrier_pass->pre_buffer_barriers.insert({
+                    rsc, vk::BufferMemoryBarrier2KHR{
+                        .srcStageMask        = last_usage.stages,
+                        .srcAccessMask       = last_usage.access,
+                        .dstStageMask        = usage.stages,
+                        .dstAccessMask       = usage.access,
+                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .buffer              = rsc.get(),
+                        .offset              = 0,
+                        .size                = VK_WHOLE_SIZE
+                    }
+                });
+            }
+            else
+            {
+                barrier_pass->pre_image_barriers.insert({
+                    rsc, vk::ImageMemoryBarrier2KHR{
+                        .srcStageMask        = last_usage.stages,
+                        .srcAccessMask       = last_usage.access,
+                        .dstStageMask        = usage.stages,
+                        .dstAccessMask       = usage.access,
+                        .oldLayout           = last_usage.exit_layout,
+                        .newLayout           = usage.layout,
+                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .image               = rsc.image.get(),
+                        .subresourceRange    = subrscToRange(rsc.subrsc)
+                    }
+                });
+            }
         }
     }
     else
@@ -148,9 +169,9 @@ void GroupBarrierGenerator::handleResource(
                 
                 last_usage.pass->post_ext_buffer_barriers.insert(
                     vk::BufferMemoryBarrier2KHR{
-                        .srcStageMask         = last_usage.end_stages,
-                        .srcAccessMask        = last_usage.end_access,
-                        .dstStageMask         = last_usage.end_stages,
+                        .srcStageMask         = last_usage.stages,
+                        .srcAccessMask        = last_usage.access,
+                        .dstStageMask         = last_usage.stages,
                         .dstAccessMask        = vk::AccessFlagBits2KHR::eNone,
                         .srcQueueFamilyIndex  = last_group->queue->getFamilyIndex(),
                         .dstQueueFamilyIndex  = group->queue->getFamilyIndex(),
@@ -167,7 +188,7 @@ void GroupBarrierGenerator::handleResource(
                         .srcAccessMask       = vk::AccessFlagBits2KHR::eNone,
                         .dstStageMask        = usage.stages,
                         .dstAccessMask       = usage.access,
-                        .oldLayout           = last_usage.end_layout,
+                        .oldLayout           = last_usage.exit_layout,
                         .newLayout           = usage.layout,
                         .srcQueueFamilyIndex = last_group->queue->getFamilyIndex(),
                         .dstQueueFamilyIndex = group->queue->getFamilyIndex(),
@@ -178,11 +199,11 @@ void GroupBarrierGenerator::handleResource(
 
                 last_usage.pass->post_ext_image_barriers.insert(
                     vk::ImageMemoryBarrier2KHR{
-                        .srcStageMask        = last_usage.end_stages,
-                        .srcAccessMask       = last_usage.end_access,
-                        .dstStageMask        = last_usage.end_stages,
+                        .srcStageMask        = last_usage.stages,
+                        .srcAccessMask       = last_usage.access,
+                        .dstStageMask        = last_usage.stages,
                         .dstAccessMask       = vk::AccessFlagBits2KHR::eNone,
-                        .oldLayout           = last_usage.end_layout,
+                        .oldLayout           = last_usage.exit_layout,
                         .newLayout           = usage.layout,
                         .srcQueueFamilyIndex = last_group->queue->getFamilyIndex(),
                         .dstQueueFamilyIndex = group->queue->getFamilyIndex(),
@@ -204,7 +225,7 @@ void GroupBarrierGenerator::handleResource(
                         .srcAccessMask       = vk::AccessFlagBits2KHR::eNone,
                         .dstStageMask        = usage.stages,
                         .dstAccessMask       = usage.access,
-                        .oldLayout           = last_usage.end_layout,
+                        .oldLayout           = last_usage.exit_layout,
                         .newLayout           = usage.layout,
                         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

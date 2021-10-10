@@ -1,4 +1,3 @@
-#include <iostream>
 #include <ranges>
 
 #include <vkpt/graph/compiler.h>
@@ -29,10 +28,14 @@ ExecutableGraph Compiler::compile(
 {
     initializeCompilePasses(graph);
     topologySortCompilePasses();
-    
     buildTransitiveClosure();
 
     collectResourceUsages();
+
+    {
+        GroupBarrierOptimizer optimizer;
+        optimizer.optimize(resource_records_);
+    }
 
     {
         auto create_pre_pass = [&]
@@ -79,6 +82,8 @@ ExecutableGraph Compiler::compile(
     for(auto &[image_subrsc, _] : resource_records_.getImages())
         processUnsignaledFinalState(image_subrsc);
 
+    mergeNeighboringReadOnlyUsages();
+
     mergeGeneratedPreAndPostPasses();
 
     {
@@ -105,13 +110,15 @@ ExecutableGraph Compiler::compile(
             group_barrier_generator.fillBarriers(group);
     }
 
-    GroupBarrierOptimizer group_barrier_optimizer;
-    for(auto group : compile_groups_)
-        group_barrier_optimizer.optimize(group);
+    {
+        GroupBarrierOptimizer group_barrier_optimizer;
+        for(auto group : compile_groups_)
+            group_barrier_optimizer.optimize(group);
+    }
 
     ExecutableGraph result(memory_);
-    result.groups.resize(compile_groups_.size(), ExecutableGroup(memory_));
 
+    result.groups.resize(compile_groups_.size(), ExecutableGroup(memory_));
     for(size_t i = 0; i < compile_groups_.size(); ++i)
         fillExecutableGroup(*compile_groups_[i], result.groups[i]);
 
@@ -339,11 +346,9 @@ void Compiler::processUnwaitedFirstUsage(const Rsc &resource)
             if constexpr(is_buffer)
             {
                 record.usages.push_front(CompileBufferUsage{
-                    .pass       = dummy_pass,
-                    .stages     = s.stages,
-                    .access     = s.access,
-                    .end_stages = s.stages,
-                    .end_access = s.access
+                    .pass   = dummy_pass,
+                    .stages = s.stages,
+                    .access = s.access
                 });
                 dummy_pass->generated_buffer_usages_[resource] =
                     record.usages.front();
@@ -351,13 +356,11 @@ void Compiler::processUnwaitedFirstUsage(const Rsc &resource)
             else
             {
                 record.usages.push_front(CompileImageUsage{
-                    .pass       = dummy_pass,
-                    .stages     = s.stages,
-                    .access     = s.access,
-                    .layout     = s.layout,
-                    .end_stages = s.stages,
-                    .end_access = s.access,
-                    .end_layout = s.layout
+                    .pass        = dummy_pass,
+                    .stages      = s.stages,
+                    .access      = s.access,
+                    .layout      = s.layout,
+                    .exit_layout = s.layout
                 });
                 dummy_pass->generated_image_usages_[resource] =
                     record.usages.front();
@@ -388,19 +391,24 @@ void Compiler::processUnsignaledFinalState(const Rsc &rsc)
     {
         buffer_final_states_[rsc] = UsingState{
             .queue  = last_usage.pass->queue,
-            .stages = last_usage.end_stages,
-            .access = last_usage.end_access
+            .stages = last_usage.stages,
+            .access = last_usage.access
         };
     }
     else
     {
         image_final_states_[rsc] = UsingState{
             .queue  = last_usage.pass->queue,
-            .stages = last_usage.end_stages,
-            .access = last_usage.end_access,
-            .layout = last_usage.end_layout
+            .stages = last_usage.stages,
+            .access = last_usage.access,
+            .layout = last_usage.exit_layout
         };
     }
+}
+
+void Compiler::mergeNeighboringReadOnlyUsages()
+{
+    // TODO
 }
 
 void Compiler::mergeGeneratedPreAndPostPasses()

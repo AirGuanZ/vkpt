@@ -143,9 +143,7 @@ void SemaphoreWaitHandler::processResourceWait(
                 record.usages.push_front(CompileBufferUsage{
                     .pass       = dummy_pass,
                     .stages     = first_usage.stages,
-                    .access     = vk::AccessFlagBits2KHR::eNone,
-                    .end_stages = first_usage.stages,
-                    .end_access = vk::AccessFlagBits2KHR::eNone
+                    .access     = vk::AccessFlagBits2KHR::eNone
                 });
                 dummy_pass->generated_buffer_usages_[rsc] =
                     record.usages.back();
@@ -153,13 +151,11 @@ void SemaphoreWaitHandler::processResourceWait(
             else
             {
                 record.usages.push_front(CompileImageUsage{
-                    .pass       = dummy_pass,
-                    .stages     = first_usage.stages,
-                    .access     = vk::AccessFlagBits2KHR::eNone,
-                    .layout     = s.layout,
-                    .end_stages = first_usage.stages,
-                    .end_access = vk::AccessFlagBits2KHR::eNone,
-                    .end_layout = s.layout
+                    .pass        = dummy_pass,
+                    .stages      = first_usage.stages,
+                    .access      = vk::AccessFlagBits2KHR::eNone,
+                    .layout      = s.layout,
+                    .exit_layout = s.layout
                 });
                 dummy_pass->generated_image_usages_[rsc] =
                     record.usages.back();
@@ -314,9 +310,7 @@ void SemaphoreWaitHandler::processResourceWait(
                     record.usages.push_front(CompileBufferUsage{
                         .pass       = dummy_pass,
                         .stages     = first_usage.stages,
-                        .access     = vk::AccessFlagBits2KHR::eNone,
-                        .end_stages = first_usage.stages,
-                        .end_access = vk::AccessFlagBits2KHR::eNone
+                        .access     = vk::AccessFlagBits2KHR::eNone
                     });
                     dummy_pass->generated_buffer_usages_[rsc] =
                         record.usages.front();
@@ -324,13 +318,11 @@ void SemaphoreWaitHandler::processResourceWait(
                 else
                 {
                     record.usages.push_front(CompileImageUsage{
-                        .pass       = dummy_pass,
-                        .stages     = first_usage.stages,
-                        .access     = vk::AccessFlagBits2KHR::eNone,
-                        .layout     = s.layout,
-                        .end_stages = first_usage.stages,
-                        .end_access = vk::AccessFlagBits2KHR::eNone,
-                        .end_layout = s.layout
+                        .pass        = dummy_pass,
+                        .stages      = first_usage.stages,
+                        .access      = vk::AccessFlagBits2KHR::eNone,
+                        .layout      = s.layout,
+                        .exit_layout = s.layout
                     });
                     dummy_pass->generated_image_usages_[rsc] =
                         record.usages.front();
@@ -399,9 +391,7 @@ void SemaphoreWaitHandler::processResourceWait(
                     record.usages.push_front(CompileBufferUsage{
                         .pass       = necessary_pass,
                         .stages     = first_usage.stages,
-                        .access     = vk::AccessFlagBits2KHR::eNone,
-                        .end_stages = first_usage.stages,
-                        .end_access = vk::AccessFlagBits2KHR::eNone
+                        .access     = vk::AccessFlagBits2KHR::eNone
                     });
                     necessary_pass->generated_buffer_usages_[rsc] =
                         record.usages.front();
@@ -409,13 +399,11 @@ void SemaphoreWaitHandler::processResourceWait(
                 else
                 {
                     record.usages.push_front(CompileImageUsage{
-                        .pass       = necessary_pass,
-                        .stages     = first_usage.stages,
-                        .access     = vk::AccessFlagBits2KHR::eNone,
-                        .layout     = s.layout,
-                        .end_stages = first_usage.stages,
-                        .end_access = vk::AccessFlagBits2KHR::eNone,
-                        .end_layout = s.layout
+                        .pass        = necessary_pass,
+                        .stages      = first_usage.stages,
+                        .access      = vk::AccessFlagBits2KHR::eNone,
+                        .layout      = s.layout,
+                        .exit_layout = s.layout
                     });
                     necessary_pass->generated_image_usages_[rsc] =
                         record.usages.front();
@@ -442,9 +430,7 @@ void SemaphoreWaitHandler::processResourceWait(
                     record.usages.push_front(CompileBufferUsage{
                         .pass       = dummy_pass,
                         .stages     = first_usage.stages,
-                        .access     = vk::AccessFlagBits2KHR::eNone,
-                        .end_stages = first_usage.stages,
-                        .end_access = vk::AccessFlagBits2KHR::eNone
+                        .access     = vk::AccessFlagBits2KHR::eNone
                     });
                     dummy_pass->generated_buffer_usages_[rsc] =
                         record.usages.front();
@@ -452,13 +438,11 @@ void SemaphoreWaitHandler::processResourceWait(
                 else
                 {
                     record.usages.push_front(CompileImageUsage{
-                        .pass       = necessary_pass,
-                        .stages     = first_usage.stages,
-                        .access     = vk::AccessFlagBits2KHR::eNone,
-                        .layout     = s.layout,
-                        .end_stages = first_usage.stages,
-                        .end_access = vk::AccessFlagBits2KHR::eNone,
-                        .end_layout = s.layout
+                        .pass        = necessary_pass,
+                        .stages      = first_usage.stages,
+                        .access      = vk::AccessFlagBits2KHR::eNone,
+                        .layout      = s.layout,
+                        .exit_layout = s.layout
                     });
                     dummy_pass->generated_image_usages_[rsc] =
                         record.usages.front();

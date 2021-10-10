@@ -1,3 +1,5 @@
+#include <ranges>
+
 #include <vkpt/graph/group_barrier_optimizer.h>
 
 VKPT_GRAPH_BEGIN
@@ -31,6 +33,14 @@ bool GroupBarrierOptimizer::isReadOnly(vk::AccessFlags2KHR access)
     return true;
 }
 
+void GroupBarrierOptimizer::optimize(ResourceRecords &records)
+{
+    for(auto &record : std::views::values(records.getBuffers()))
+        mergeNeighboringUsages(record);
+    for(auto &record : std::views::values(records.getImages()))
+        mergeNeighboringUsages(record);
+}
+
 void GroupBarrierOptimizer::optimize(CompileGroup *group)
 {
     movePreExtBarriers(group);
@@ -38,7 +48,39 @@ void GroupBarrierOptimizer::optimize(CompileGroup *group)
     mergePreAndPostBarriers(group);
 
     // TODO: convert buffer barriers to global memory barriers
-    // TODO: remove redundant barriers
+}
+
+void GroupBarrierOptimizer::mergeNeighboringUsages(CompileBuffer &record)
+{
+    for(auto it = record.usages.begin(), jt = std::next(it);
+        jt != record.usages.end(); it = jt++)
+    {
+        auto &this_usage = *it, &next_usage = *jt;
+        if(isReadOnly(this_usage.access) && isReadOnly(next_usage.access))
+        {
+            this_usage.stages |= next_usage.stages;
+            this_usage.access |= next_usage.access;
+            next_usage.stages = this_usage.stages;
+            next_usage.access = this_usage.access;
+        }
+    }
+}
+
+void GroupBarrierOptimizer::mergeNeighboringUsages(CompileImage &record)
+{
+    for(auto it = record.usages.begin(), jt = std::next(it);
+        jt != record.usages.end(); it = jt++)
+    {
+        auto &this_usage = *it, &next_usage = *jt;
+        if(isReadOnly(this_usage.access) && isReadOnly(next_usage.access) &&
+           this_usage.exit_layout == next_usage.layout)
+        {
+            this_usage.stages |= next_usage.stages;
+            this_usage.access |= next_usage.access;
+            next_usage.stages = this_usage.stages;
+            next_usage.access = this_usage.access;
+        }
+    }
 }
 
 void GroupBarrierOptimizer::movePreExtBarriers(CompileGroup *group)

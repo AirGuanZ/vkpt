@@ -23,6 +23,12 @@ private:
     // if no such pass exists, returns B
     CompilePass *getBarrierPass(CompilePass *A, CompilePass *B);
 
+    bool shouldSkipBarrier(
+        const Pass::BufferUsage &a, const Pass::BufferUsage &b) const;
+
+    bool shouldSkipBarrier(
+        const Pass::ImageUsage &a, const Pass::ImageUsage &b) const;
+
     template<typename Resource, typename PassUsage>
     void handleResource(
         CompilePass *pass, const Resource &rsc, const PassUsage &usage);

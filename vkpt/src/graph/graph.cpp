@@ -44,6 +44,21 @@ PassBase::PassBase(std::pmr::memory_resource &memory)
     
 }
 
+void PassBase::clearBufferUsages()
+{
+    buffer_usages_.clear();
+}
+
+void PassBase::clearImageUsages()
+{
+    image_usages_.clear();
+}
+
+void PassBase::clearFences()
+{
+    fences_.clear();
+}
+
 void PassBase::addBufferUsage(const Buffer &buffer, const BufferUsage &usage)
 {
     assert(!buffer_usages_.contains(buffer));
@@ -66,25 +81,22 @@ void Pass::use(
     const Image                &image,
     const vk::ImageSubresource &subrsc,
     const ResourceUsage        &usage,
-    const ResourceUsage        &exit_usage)
+    vk::ImageLayout             exit_layout)
 {
-    if(exit_usage == USAGE_NIL)
-        use(image, subrsc, usage, usage);
+    if(exit_layout == vk::ImageLayout::eUndefined)
+        use(image, subrsc, usage, usage.layout);
     else
     {
         addImageUsage(
             { image, subrsc },
-            ImageUsage{
-                usage.stages, usage.access, usage.layout,
-                exit_usage.stages, exit_usage.access, exit_usage.layout
-            });
+            { usage.stages, usage.access, usage.layout, exit_layout });
     }
 }
 
 void Pass::use(
     const Image         &image,
     const ResourceUsage &usage,
-    const ResourceUsage &exit_usage)
+    vk::ImageLayout      exit_layout)
 {
     auto &desc = image.getDescription();
 
@@ -93,20 +105,20 @@ void Pass::use(
     const bool has_color   = !has_depth && !has_stencil;
 
     if(has_depth)
-        use(image, vk::ImageAspectFlagBits::eDepth, usage, exit_usage);
+        use(image, vk::ImageAspectFlagBits::eDepth, usage, exit_layout);
     
     if(has_stencil)
-        use(image, vk::ImageAspectFlagBits::eStencil, usage, exit_usage);
+        use(image, vk::ImageAspectFlagBits::eStencil, usage, exit_layout);
 
     if(has_color)
-        use(image, vk::ImageAspectFlagBits::eColor, usage, exit_usage);
+        use(image, vk::ImageAspectFlagBits::eColor, usage, exit_layout);
 }
 
 void Pass::use(
     const Image         &image,
     vk::ImageAspectFlags aspect,
     const ResourceUsage &usage,
-    const ResourceUsage &exit_usage)
+    vk::ImageLayout      exit_layout)
 {
     auto &desc = image.getDescription();
     use(image, vk::ImageSubresourceRange{
@@ -115,37 +127,26 @@ void Pass::use(
         .levelCount     = desc.mip_levels,
         .baseArrayLayer = 0,
         .layerCount     = desc.array_layers
-    }, usage, exit_usage);
+    }, usage, exit_layout);
 }
 
 void Pass::use(
     const Image                     &image,
     const vk::ImageSubresourceRange &range,
     const ResourceUsage             &usage,
-    const ResourceUsage             &exit_usage)
+    vk::ImageLayout                  exit_layout)
 {
     foreachSubrsc(range, [&](const vk::ImageSubresource &subrsc)
     {
-        use(image, subrsc, usage, exit_usage);
+        use(image, subrsc, usage, exit_layout);
     });
 }
 
 void Pass::use(
     const Buffer        &buffer,
-    const ResourceUsage &usage,
-    const ResourceUsage &exit_usage)
+    const ResourceUsage &usage)
 {
-    if(exit_usage == USAGE_NIL)
-        use(buffer, usage, usage);
-    else
-    {
-        addBufferUsage(
-            buffer,
-            BufferUsage{
-                usage.stages, usage.access,
-                exit_usage.stages, exit_usage.access
-            });
-    }
+    addBufferUsage(buffer, { usage.stages, usage.access });
 }
 
 void Pass::signal(vk::Fence fence)

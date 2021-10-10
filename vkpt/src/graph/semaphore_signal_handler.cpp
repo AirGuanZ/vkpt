@@ -104,21 +104,21 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
 
                 buffer_final_states_[rsc] = UsingState{
                     .queue  = last_pass->queue,
-                    .stages = last_usage.end_stages,
-                    .access = last_usage.end_access
+                    .stages = last_usage.stages,
+                    .access = last_usage.access
                 };
             }
             else
             {
-                if(last_usage.end_layout != signal.layout)
+                if(last_usage.exit_layout != signal.layout)
                 {
                     last_pass->post_ext_image_barriers.insert(
                         vk::ImageMemoryBarrier2KHR{
-                            .srcStageMask        = last_usage.end_stages,
-                            .srcAccessMask       = last_usage.end_access,
-                            .dstStageMask        = last_usage.end_stages,
+                            .srcStageMask        = last_usage.stages,
+                            .srcAccessMask       = last_usage.access,
+                            .dstStageMask        = last_usage.stages,
                             .dstAccessMask       = vk::AccessFlagBits2KHR::eNone,
-                            .oldLayout           = last_usage.end_layout,
+                            .oldLayout           = last_usage.exit_layout,
                             .newLayout           = signal.layout,
                             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -129,9 +129,9 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
 
                 image_final_states_[rsc] = UsingState{
                     .queue  = last_pass->queue,
-                    .stages = last_usage.end_stages,
-                    .access = last_usage.end_access,
-                    .layout = last_usage.end_layout
+                    .stages = last_usage.stages,
+                    .access = last_usage.access,
+                    .layout = last_usage.exit_layout
                 };
             }
         }
@@ -148,8 +148,8 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                 {
                     necessary_pass->post_ext_buffer_barriers.insert(
                         vk::BufferMemoryBarrier2KHR{
-                            .srcStageMask        = last_usage.end_stages,
-                            .srcAccessMask       = last_usage.end_access,
+                            .srcStageMask        = last_usage.stages,
+                            .srcAccessMask       = last_usage.access,
                             .dstStageMask        = vk::PipelineStageFlagBits2KHR::eNone,
                             .dstAccessMask       = vk::AccessFlagBits2KHR::eNone,
                             .srcQueueFamilyIndex = last_family,
@@ -168,11 +168,11 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                 {
                     necessary_pass->post_ext_image_barriers.insert(
                         vk::ImageMemoryBarrier2KHR{
-                            .srcStageMask        = last_usage.end_stages,
-                            .srcAccessMask       = last_usage.end_access,
+                            .srcStageMask        = last_usage.stages,
+                            .srcAccessMask       = last_usage.access,
                             .dstStageMask        = vk::PipelineStageFlagBits2KHR::eNone,
                             .dstAccessMask       = vk::AccessFlagBits2KHR::eNone,
-                            .oldLayout           = last_usage.end_layout,
+                            .oldLayout           = last_usage.exit_layout,
                             .newLayout           = signal.layout,
                             .srcQueueFamilyIndex = last_family,
                             .dstQueueFamilyIndex = signal_family,
@@ -183,7 +183,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                     image_final_states_[rsc] = ReleasedState{
                         .src_queue  = last_pass->queue,
                         .dst_queue  = signal.queue,
-                        .old_layout = last_usage.end_layout,
+                        .old_layout = last_usage.exit_layout,
                         .new_layout = signal.layout
                     };
                 }
@@ -210,9 +210,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                     record.usages.push_back(CompileBufferUsage{
                         .pass       = dummy_pass,
                         .stages     = vk::PipelineStageFlagBits2KHR::eNone,
-                        .access     = vk::AccessFlagBits2KHR::eNone,
-                        .end_stages = vk::PipelineStageFlagBits2KHR::eNone,
-                        .end_access = vk::AccessFlagBits2KHR::eNone
+                        .access     = vk::AccessFlagBits2KHR::eNone
                     });
                     dummy_pass->generated_buffer_usages_[rsc] =
                         record.usages.back();
@@ -226,13 +224,11 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                 else
                 {
                     record.usages.push_back(CompileImageUsage{
-                        .pass       = dummy_pass,
-                        .stages     = vk::PipelineStageFlagBits2KHR::eNone,
-                        .access     = vk::AccessFlagBits2KHR::eNone,
-                        .layout     = signal.layout,
-                        .end_stages = vk::PipelineStageFlagBits2KHR::eNone,
-                        .end_access = vk::AccessFlagBits2KHR::eNone,
-                        .end_layout = signal.layout
+                        .pass        = dummy_pass,
+                        .stages      = vk::PipelineStageFlagBits2KHR::eNone,
+                        .access      = vk::AccessFlagBits2KHR::eNone,
+                        .layout      = signal.layout,
+                        .exit_layout = signal.layout
                     });
                     dummy_pass->generated_image_usages_[rsc] =
                         record.usages.back();
@@ -271,21 +267,21 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
 
             buffer_final_states_[rsc] = UsingState{
                 .queue  = last_pass->queue,
-                .stages = last_usage.end_stages,
-                .access = last_usage.end_access
+                .stages = last_usage.stages,
+                .access = last_usage.access
             };
         }
         else
         {
-            if(last_usage.end_layout != signal.layout)
+            if(last_usage.exit_layout != signal.layout)
             {
                 last_pass->post_ext_image_barriers.insert(
                     vk::ImageMemoryBarrier2KHR{
-                        .srcStageMask        = last_usage.end_stages,
-                        .srcAccessMask       = last_usage.end_access,
-                        .dstStageMask        = last_usage.end_stages,
+                        .srcStageMask        = last_usage.stages,
+                        .srcAccessMask       = last_usage.access,
+                        .dstStageMask        = last_usage.stages,
                         .dstAccessMask       = vk::AccessFlagBits2KHR::eNone,
-                        .oldLayout           = last_usage.end_layout,
+                        .oldLayout           = last_usage.exit_layout,
                         .newLayout           = signal.layout,
                         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -296,8 +292,8 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
 
             image_final_states_[rsc] = UsingState{
                 .queue  = last_pass->queue,
-                .stages = last_usage.end_stages,
-                .access = last_usage.end_access,
+                .stages = last_usage.stages,
+                .access = last_usage.access,
                 .layout = signal.layout
             };
         }
@@ -315,9 +311,9 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
             {
                 last_pass->post_ext_buffer_barriers.insert(
                     vk::BufferMemoryBarrier2KHR{
-                        .srcStageMask        = last_usage.end_stages,
-                        .srcAccessMask       = last_usage.end_access,
-                        .dstStageMask        = last_usage.end_stages,
+                        .srcStageMask        = last_usage.stages,
+                        .srcAccessMask       = last_usage.access,
+                        .dstStageMask        = last_usage.stages,
                         .dstAccessMask       = vk::AccessFlagBits2KHR::eNone,
                         .srcQueueFamilyIndex = last_family,
                         .dstQueueFamilyIndex = signal_family,
@@ -335,11 +331,11 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
             {
                 last_pass->post_ext_image_barriers.insert(
                     vk::ImageMemoryBarrier2KHR{
-                        .srcStageMask        = last_usage.end_stages,
-                        .srcAccessMask       = last_usage.end_access,
-                        .dstStageMask        = last_usage.end_stages,
+                        .srcStageMask        = last_usage.stages,
+                        .srcAccessMask       = last_usage.access,
+                        .dstStageMask        = last_usage.stages,
                         .dstAccessMask       = vk::AccessFlagBits2KHR::eNone,
-                        .oldLayout           = last_usage.end_layout,
+                        .oldLayout           = last_usage.exit_layout,
                         .newLayout           = signal.layout,
                         .srcQueueFamilyIndex = last_family,
                         .dstQueueFamilyIndex = signal_family,
@@ -350,7 +346,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                 image_final_states_[rsc] = ReleasedState{
                     .src_queue  = last_pass->queue,
                     .dst_queue  = signal.queue,
-                    .old_layout = last_usage.end_layout,
+                    .old_layout = last_usage.exit_layout,
                     .new_layout = signal.layout
                 };
             }
@@ -364,9 +360,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                 record.usages.push_back(CompileBufferUsage{
                     .pass       = necessary_pass,
                     .stages     = vk::PipelineStageFlagBits2KHR::eNone,
-                    .access     = vk::AccessFlagBits2KHR::eNone,
-                    .end_stages = vk::PipelineStageFlagBits2KHR::eNone,
-                    .end_access = vk::AccessFlagBits2KHR::eNone
+                    .access     = vk::AccessFlagBits2KHR::eNone
                 });
                 necessary_pass->generated_buffer_usages_[rsc] =
                     record.usages.back();
@@ -380,13 +374,11 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
             else
             {
                 record.usages.push_back(CompileImageUsage{
-                    .pass       = necessary_pass,
-                    .stages     = vk::PipelineStageFlagBits2KHR::eNone,
-                    .access     = vk::AccessFlagBits2KHR::eNone,
-                    .layout     = signal.layout,
-                    .end_stages = vk::PipelineStageFlagBits2KHR::eNone,
-                    .end_access = vk::AccessFlagBits2KHR::eNone,
-                    .end_layout = signal.layout
+                    .pass        = necessary_pass,
+                    .stages      = vk::PipelineStageFlagBits2KHR::eNone,
+                    .access      = vk::AccessFlagBits2KHR::eNone,
+                    .layout      = signal.layout,
+                    .exit_layout = signal.layout
                 });
                 necessary_pass->generated_image_usages_[rsc] =
                     record.usages.back();
@@ -416,8 +408,8 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
             {
                 last_pass->post_ext_buffer_barriers.insert(
                     vk::BufferMemoryBarrier2KHR{
-                        .srcStageMask        = last_usage.end_stages,
-                        .srcAccessMask       = last_usage.end_access,
+                        .srcStageMask        = last_usage.stages,
+                        .srcAccessMask       = last_usage.access,
                         .dstStageMask        = vk::PipelineStageFlagBits2KHR::eNone,
                         .dstAccessMask       = vk::AccessFlagBits2KHR::eNone,
                         .srcQueueFamilyIndex = last_family,
@@ -436,11 +428,11 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
             {
                 last_pass->post_ext_image_barriers.insert(
                     vk::ImageMemoryBarrier2KHR{
-                        .srcStageMask        = last_usage.end_stages,
-                        .srcAccessMask       = last_usage.end_access,
+                        .srcStageMask        = last_usage.stages,
+                        .srcAccessMask       = last_usage.access,
                         .dstStageMask        = vk::PipelineStageFlagBits2KHR::eNone,
                         .dstAccessMask       = vk::AccessFlagBits2KHR::eNone,
-                        .oldLayout           = last_usage.end_layout,
+                        .oldLayout           = last_usage.exit_layout,
                         .newLayout           = signal.layout,
                         .srcQueueFamilyIndex = last_family,
                         .dstQueueFamilyIndex = signal_family,
@@ -451,7 +443,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                 image_final_states_[rsc] = ReleasedState{
                     .src_queue  = last_pass->queue,
                     .dst_queue  = signal.queue,
-                    .old_layout = last_usage.end_layout,
+                    .old_layout = last_usage.exit_layout,
                     .new_layout = signal.layout
                 };
             }
@@ -478,9 +470,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                 record.usages.push_back(CompileBufferUsage{
                     .pass       = dummy_pass,
                     .stages     = vk::PipelineStageFlagBits2KHR::eNone,
-                    .access     = vk::AccessFlagBits2KHR::eNone,
-                    .end_stages = vk::PipelineStageFlagBits2KHR::eNone,
-                    .end_access = vk::AccessFlagBits2KHR::eNone
+                    .access     = vk::AccessFlagBits2KHR::eNone
                 });
                 dummy_pass->generated_buffer_usages_[rsc] =
                     record.usages.back();
@@ -494,13 +484,11 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
             else
             {
                 record.usages.push_back(CompileImageUsage{
-                    .pass       = dummy_pass,
-                    .stages     = vk::PipelineStageFlagBits2KHR::eNone,
-                    .access     = vk::AccessFlagBits2KHR::eNone,
-                    .layout     = signal.layout,
-                    .end_stages = vk::PipelineStageFlagBits2KHR::eNone,
-                    .end_access = vk::AccessFlagBits2KHR::eNone,
-                    .end_layout = signal.layout
+                    .pass        = dummy_pass,
+                    .stages      = vk::PipelineStageFlagBits2KHR::eNone,
+                    .access      = vk::AccessFlagBits2KHR::eNone,
+                    .layout      = signal.layout,
+                    .exit_layout = signal.layout
                 });
                 dummy_pass->generated_image_usages_[rsc] =
                     record.usages.back();

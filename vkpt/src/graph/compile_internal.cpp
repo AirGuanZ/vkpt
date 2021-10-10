@@ -30,9 +30,7 @@ CompileBufferUsage::operator Pass::BufferUsage() const
 {
     return Pass::BufferUsage{
         .stages     = stages,
-        .access     = access,
-        .end_stages = end_stages,
-        .end_access = end_access
+        .access     = access
     };
 }
 
@@ -42,9 +40,7 @@ CompileImageUsage::operator Pass::ImageUsage() const
         .stages     = stages,
         .access     = access,
         .layout     = layout,
-        .end_stages = end_stages,
-        .end_access = end_access,
-        .end_layout = end_layout
+        .exit_layout = exit_layout
     };
 }
 
