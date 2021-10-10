@@ -20,7 +20,7 @@ void ResourceRecords::build(std::span<CompilePass*> sorted_passes)
 
     for(auto pass : sorted_passes)
     {
-        for(auto &[buffer, usage] : pass->raw_pass->_bufferUsages())
+        for(auto &[buffer, usage] : pass->raw_pass->_getBufferUsages())
         {
             auto &compile_buffer = compile_buffers_.try_emplace(
                 buffer, create_compile_buffer).first->second;
@@ -34,7 +34,7 @@ void ResourceRecords::build(std::span<CompilePass*> sorted_passes)
             });
         }
 
-        for(auto &[image_subrsc, usage] : pass->raw_pass->_imageUsages())
+        for(auto &[image_subrsc, usage] : pass->raw_pass->_getImageUsages())
         {
             auto &compile_image = compile_images_.try_emplace(
                 image_subrsc, create_compile_image).first->second;

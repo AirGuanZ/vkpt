@@ -69,8 +69,8 @@ void Executor::record(
                     pass.pre_image_barriers);
             }
 
-            if(pass.callback)
-                (*pass.callback)(context);
+            if(pass.pass)
+                pass.pass->onPassRender(context);
             
             if(!pass.post_memory_barriers.empty() ||
                !pass.post_buffer_barriers.empty() ||

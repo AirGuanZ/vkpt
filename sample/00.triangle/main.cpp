@@ -234,7 +234,8 @@ void run()
             context.getImage(), context.getPresentAvailableSemaphore(),
             context.getPresentQueue(), vk::ImageLayout::ePresentSrcKHR, false);
 
-        auto triangle_pass = graph.addPass(context.getGraphicsQueue());
+        auto triangle_pass = graph.addPass();
+        triangle_pass->setQueue(context.getGraphicsQueue());
         triangle_pass->use(context.getImage(), rg::USAGE_RENDER_TARGET);
         triangle_pass->use(color_render_target.getImage(), rg::USAGE_RENDER_TARGET);
         triangle_pass->setCallback([&](rg::PassContext &pass_context)

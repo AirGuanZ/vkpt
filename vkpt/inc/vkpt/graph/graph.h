@@ -11,6 +11,9 @@
 
 VKPT_GRAPH_BEGIN
 
+class Graph;
+class Compiler;
+
 class PassContext
 {
 public:
@@ -33,7 +36,7 @@ private:
     Vector<vk::CommandBufferSubmitInfoKHR> &command_buffers_;
 };
 
-class Pass
+class PassBase
 {
 public:
 
@@ -56,6 +59,54 @@ public:
         vk::AccessFlags2KHR        end_access;
         vk::ImageLayout            end_layout;
     };
+
+    PassBase() = default;
+
+    explicit PassBase(std::pmr::memory_resource &memory);
+
+    virtual ~PassBase() = default;
+
+    virtual std::string getPassName() const = 0;
+
+    virtual const Queue *getPassQueue() const = 0;
+
+    virtual void onPassRender(PassContext &context) = 0;
+
+    const Set<PassBase *> &_getTails() const { return tails_; }
+    const Set<PassBase *> &_getHeads() const { return heads_; }
+
+    const Map<Buffer, BufferUsage>            &_getBufferUsages() const { return buffer_usages_; }
+    const Map<ImageSubresource, ImageUsage>   &_getImageUsages()  const { return image_usages_; }
+
+    const List<vk::Fence> &_getFences() const { return fences_; }
+
+protected:
+
+    void addBufferUsage(const Buffer &buffer, const BufferUsage &usage);
+
+    void addImageUsage(const ImageSubresource &image, const ImageUsage &usage);
+
+    void addFence(vk::Fence fence);
+
+private:
+
+    friend class Graph;
+    friend class Compiler;
+
+    int index_ = -1;
+
+    Set<PassBase *> tails_;
+    Set<PassBase *> heads_;
+
+    Map<Buffer, BufferUsage>          buffer_usages_;
+    Map<ImageSubresource, ImageUsage> image_usages_;
+
+    List<vk::Fence> fences_;
+};
+
+class Pass : public PassBase
+{
+public:
 
     using Callback = std::function<void(PassContext &)>;
 
@@ -93,33 +144,23 @@ public:
 
     void setName(std::string name);
 
-    const std::string &getName() const;
+    void setQueue(const Queue *queue);
 
-    auto &_bufferUsages() const { return buffer_usages_; }
-    auto &_imageUsages()  const { return image_usages_; }
+    std::string getPassName() const override;
+
+    const Queue *getPassQueue() const override;
+
+    void onPassRender(PassContext &context) override;
 
 private:
 
     friend class agz::alloc::object_releaser_t;
-    friend class Compiler;
-    friend class Graph;
-    friend class GroupBarrierGenerator;
 
     explicit Pass(std::pmr::memory_resource &memory);
 
     const Queue *queue_;
-    int          index_;
     std::string  name_;
-
-    Callback callback_;
-
-    Map<Buffer, BufferUsage>          buffer_usages_;
-    Map<ImageSubresource, ImageUsage> image_usages_;
-
-    List<vk::Fence> signal_fences_;
-
-    Set<Pass *> tails_;
-    Set<Pass *> heads_;
+    Callback     callback_;
 };
 
 class Graph
@@ -128,7 +169,9 @@ public:
 
     Graph();
 
-    Pass *addPass(const Queue *queue);
+    void registerPass(PassBase *pass);
+
+    Pass *addPass();
 
     void waitBeforeFirstUsage(
         const Buffer &buffer,
@@ -212,12 +255,12 @@ private:
         bool              release_only;
     };
 
-    void addDependency(std::initializer_list<Pass *> passes);
+    void addDependency(std::initializer_list<PassBase *> passes);
 
     agz::alloc::memory_resource_arena_t memory_;
     agz::alloc::object_releaser_t       arena_;
 
-    List<Pass *> passes_;
+    List<PassBase *> passes_;
 
     Map<Buffer, Semaphore>           buffer_waits_;
     Map<ImageSubresource, Semaphore> image_waits_;
@@ -229,7 +272,8 @@ private:
 template<typename...Args>
 void Graph::addDependency(Args...passes)
 {
-    static_assert((std::is_same_v<Args, Pass*> && ...));
+    static_assert(
+        (std::is_base_of_v<PassBase, std::remove_pointer_t<Args>> && ...));
     this->addDependency({ passes... });
 }
 

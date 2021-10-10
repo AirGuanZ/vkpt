@@ -34,6 +34,34 @@ PassContext::PassContext(
     });
 }
 
+PassBase::PassBase(std::pmr::memory_resource &memory)
+    : tails_(&memory),
+      heads_(&memory),
+      buffer_usages_(&memory),
+      image_usages_(&memory),
+      fences_(&memory)
+{
+    
+}
+
+void PassBase::addBufferUsage(const Buffer &buffer, const BufferUsage &usage)
+{
+    assert(!buffer_usages_.contains(buffer));
+    buffer_usages_.insert({ buffer, usage });
+}
+
+void PassBase::addImageUsage(const ImageSubresource &image, const ImageUsage &usage)
+{
+    assert(!image_usages_.contains(image));
+    image_usages_.insert({ image, usage });
+}
+
+void PassBase::addFence(vk::Fence fence)
+{
+    assert(std::ranges::find(fences_, fence) == fences_.end());
+    fences_.push_back(fence);
+}
+
 void Pass::use(
     const Image                &image,
     const vk::ImageSubresource &subrsc,
@@ -44,13 +72,11 @@ void Pass::use(
         use(image, subrsc, usage, usage);
     else
     {
-        image_usages_.insert(
-            {
-                { image, subrsc },
-                {
-                    usage.stages, usage.access, usage.layout,
-                    exit_usage.stages, exit_usage.access, exit_usage.layout
-                }
+        addImageUsage(
+            { image, subrsc },
+            ImageUsage{
+                usage.stages, usage.access, usage.layout,
+                exit_usage.stages, exit_usage.access, exit_usage.layout
             });
     }
 }
@@ -113,20 +139,18 @@ void Pass::use(
         use(buffer, usage, usage);
     else
     {
-        buffer_usages_.insert(
-            {
-                buffer,
-                {
-                    usage.stages, usage.access,
-                    exit_usage.stages, exit_usage.access
-                }
+        addBufferUsage(
+            buffer,
+            BufferUsage{
+                usage.stages, usage.access,
+                exit_usage.stages, exit_usage.access
             });
     }
 }
 
 void Pass::signal(vk::Fence fence)
 {
-    signal_fences_.push_back(fence);
+    addFence(fence);
 }
 
 void Pass::setCallback(Callback callback)
@@ -139,19 +163,29 @@ void Pass::setName(std::string name)
     name_.swap(name);
 }
 
-const std::string &Pass::getName() const
+void Pass::setQueue(const Queue *queue)
+{
+    queue_ = queue;
+}
+
+std::string Pass::getPassName() const
 {
     return name_;
 }
 
+const Queue *Pass::getPassQueue() const
+{
+    return queue_;
+}
+
+void Pass::onPassRender(PassContext &context)
+{
+    if(callback_)
+        callback_(context);
+}
+
 Pass::Pass(std::pmr::memory_resource &memory)
-    : queue_(nullptr),
-      index_(-1),
-      buffer_usages_(&memory),
-      image_usages_(&memory),
-      signal_fences_(&memory),
-      tails_(&memory),
-      heads_(&memory)
+    : PassBase(memory), queue_(nullptr)
 {
     
 }
@@ -167,12 +201,16 @@ Graph::Graph()
     
 }
 
-Pass *Graph::addPass(const Queue *queue)
+void Graph::registerPass(PassBase *pass)
 {
-    Pass *pass = arena_.create<Pass>(memory_);
-    pass->queue_ = queue;
     pass->index_ = static_cast<int>(passes_.size());
     passes_.push_back(pass);
+}
+
+Pass *Graph::addPass()
+{
+    Pass *pass = arena_.create<Pass>(memory_);
+    registerPass(pass);
     return pass;
 }
 
@@ -362,7 +400,7 @@ void Graph::execute(
     executor.submit();
 }
 
-void Graph::addDependency(std::initializer_list<Pass*> passes)
+void Graph::addDependency(std::initializer_list<PassBase *> passes)
 {
     auto ptr = passes.begin();
     for(size_t i = 1; i < passes.size(); ++i)

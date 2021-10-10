@@ -37,7 +37,7 @@ struct CompilePass
 {
     explicit CompilePass(std::pmr::memory_resource &memory);
 
-    const Pass  *raw_pass;
+    PassBase    *raw_pass;
     const Queue *queue;
 
     CompileGroup *group;

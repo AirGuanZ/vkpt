@@ -226,7 +226,8 @@ rg::Pass *ImGuiIntegration::addToGraph(
         .mipLevel   = 0,
         .arrayLayer = 0
     };
-    auto pass = graph.addPass(impl_->queue);
+    auto pass = graph.addPass();
+    pass->setQueue(impl_->queue);
     pass->use(
         image_view.getImage(), subrsc, rg::USAGE_RENDER_TARGET);
     pass->setCallback([image_view, this](rg::PassContext &context)

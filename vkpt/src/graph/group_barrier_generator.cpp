@@ -27,10 +27,10 @@ void GroupBarrierGenerator::fillBarriers(CompileGroup *group)
         if(!pass->raw_pass)
             continue;
 
-        for(auto &[buffer, usage] : pass->raw_pass->buffer_usages_)
+        for(auto &[buffer, usage] : pass->raw_pass->_getBufferUsages())
             handleResource(pass, buffer, usage);
 
-        for(auto &[image_subrsc, usage] : pass->raw_pass->image_usages_)
+        for(auto &[image_subrsc, usage] : pass->raw_pass->_getImageUsages())
             handleResource(pass, image_subrsc, usage);
     }
 }

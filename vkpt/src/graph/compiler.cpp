@@ -143,7 +143,9 @@ void Compiler::initializeCompilePasses(const Graph &graph)
         auto compile_pass = arena_.create<CompilePass>(memory_);
 
         compile_pass->raw_pass = raw_pass;
-        compile_pass->queue    = raw_pass->queue_;
+        compile_pass->queue    = raw_pass->getPassQueue();
+        if(!compile_pass->queue)
+            fatal("pass {}'s queue is nil", raw_pass->getPassName());
 
         compile_passes_.insert(compile_pass);
         raw_to_compile.push_back(compile_pass);
@@ -668,8 +670,7 @@ void Compiler::fillExecutableGroup(
         output.passes.emplace_back(memory_);
         auto &output_pass = output.passes.back();
 
-        output_pass.callback = !pass->raw_pass ? nullptr :
-            (pass->raw_pass->callback_ ? &pass->raw_pass->callback_ : nullptr);
+        output_pass.pass = pass->raw_pass;
 
         output_pass.pre_buffer_barriers.reserve(
             pass->pre_buffer_barriers.size() +
@@ -722,8 +723,8 @@ void Compiler::fillExecutableGroup(
         if(pass->raw_pass)
         {
             std::copy(
-                pass->raw_pass->signal_fences_.begin(),
-                pass->raw_pass->signal_fences_.end(),
+                pass->raw_pass->_getFences().begin(),
+                pass->raw_pass->_getFences().end(),
                 std::back_inserter(output.signal_fences));
         }
     }

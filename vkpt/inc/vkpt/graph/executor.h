@@ -8,7 +8,7 @@ struct ExecutablePass
 {
     explicit ExecutablePass(std::pmr::memory_resource &memory);
 
-    const Pass::Callback *callback = nullptr;
+    PassBase *pass;
 
     Vector<vk::MemoryBarrier2KHR>       pre_memory_barriers;
     Vector<vk::BufferMemoryBarrier2KHR> pre_buffer_barriers;
