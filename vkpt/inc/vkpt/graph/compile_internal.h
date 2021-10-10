@@ -59,11 +59,14 @@ struct CompilePass
     Map<Buffer, vk::BufferMemoryBarrier2KHR>          pre_buffer_barriers;
     Map<ImageSubresource, vk::ImageMemoryBarrier2KHR> pre_image_barriers;
 
+    std::optional<vk::MemoryBarrier2KHR> pre_memory_barrier;
+    std::optional<vk::MemoryBarrier2KHR> post_memory_barrier;
+
     Map<Semaphore, vk::SemaphoreSubmitInfoKHR> wait_semaphores;
     Map<Semaphore, vk::SemaphoreSubmitInfoKHR> signal_semaphores;
 
-    Map<Buffer, Pass::BufferUsage>          generated_buffer_usages_;
-    Map<ImageSubresource, Pass::ImageUsage> generated_image_usages_;
+    Map<Buffer, Pass::BufferUsage>          generated_buffer_usages;
+    Map<ImageSubresource, Pass::ImageUsage> generated_image_usages;
 };
 
 struct CompileGroup

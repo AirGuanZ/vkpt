@@ -145,7 +145,7 @@ void SemaphoreWaitHandler::processResourceWait(
                     .stages     = first_usage.stages,
                     .access     = vk::AccessFlagBits2KHR::eNone
                 });
-                dummy_pass->generated_buffer_usages_[rsc] =
+                dummy_pass->generated_buffer_usages[rsc] =
                     record.usages.back();
             }
             else
@@ -157,7 +157,7 @@ void SemaphoreWaitHandler::processResourceWait(
                     .layout      = s.layout,
                     .exit_layout = s.layout
                 });
-                dummy_pass->generated_image_usages_[rsc] =
+                dummy_pass->generated_image_usages[rsc] =
                     record.usages.back();
             }
         }
@@ -312,7 +312,7 @@ void SemaphoreWaitHandler::processResourceWait(
                         .stages     = first_usage.stages,
                         .access     = vk::AccessFlagBits2KHR::eNone
                     });
-                    dummy_pass->generated_buffer_usages_[rsc] =
+                    dummy_pass->generated_buffer_usages[rsc] =
                         record.usages.front();
                 }
                 else
@@ -324,7 +324,7 @@ void SemaphoreWaitHandler::processResourceWait(
                         .layout      = s.layout,
                         .exit_layout = s.layout
                     });
-                    dummy_pass->generated_image_usages_[rsc] =
+                    dummy_pass->generated_image_usages[rsc] =
                         record.usages.front();
                 }
             }
@@ -393,7 +393,7 @@ void SemaphoreWaitHandler::processResourceWait(
                         .stages     = first_usage.stages,
                         .access     = vk::AccessFlagBits2KHR::eNone
                     });
-                    necessary_pass->generated_buffer_usages_[rsc] =
+                    necessary_pass->generated_buffer_usages[rsc] =
                         record.usages.front();
                 }
                 else
@@ -405,7 +405,7 @@ void SemaphoreWaitHandler::processResourceWait(
                         .layout      = s.layout,
                         .exit_layout = s.layout
                     });
-                    necessary_pass->generated_image_usages_[rsc] =
+                    necessary_pass->generated_image_usages[rsc] =
                         record.usages.front();
                 }
             }
@@ -432,7 +432,7 @@ void SemaphoreWaitHandler::processResourceWait(
                         .stages     = first_usage.stages,
                         .access     = vk::AccessFlagBits2KHR::eNone
                     });
-                    dummy_pass->generated_buffer_usages_[rsc] =
+                    dummy_pass->generated_buffer_usages[rsc] =
                         record.usages.front();
                 }
                 else
@@ -444,7 +444,7 @@ void SemaphoreWaitHandler::processResourceWait(
                         .layout      = s.layout,
                         .exit_layout = s.layout
                     });
-                    dummy_pass->generated_image_usages_[rsc] =
+                    dummy_pass->generated_image_usages[rsc] =
                         record.usages.front();
                 }
             }

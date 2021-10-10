@@ -46,8 +46,7 @@ void GroupBarrierOptimizer::optimize(CompileGroup *group)
     movePreExtBarriers(group);
     movePostExtBarriers(group);
     mergePreAndPostBarriers(group);
-
-    // TODO: convert buffer barriers to global memory barriers
+    convertBufferBarrierToGlobalMemoryBarrier(group);
 }
 
 void GroupBarrierOptimizer::mergeNeighboringUsages(CompileBuffer &record)
@@ -207,6 +206,52 @@ void GroupBarrierOptimizer::mergePreAndPostBarriers(CompileGroup *group)
 
         last_pass->post_ext_buffer_barriers.clear();
         last_pass->post_ext_image_barriers.clear();
+    }
+}
+
+void GroupBarrierOptimizer::convertBufferBarrierToGlobalMemoryBarrier(
+    CompileGroup *group)
+{
+    auto process = [&](
+        const vk::BufferMemoryBarrier2KHR    &barrier,
+        std::optional<vk::MemoryBarrier2KHR> &memory)
+    {
+        if(barrier.srcQueueFamilyIndex != barrier.dstQueueFamilyIndex)
+            return false;
+        if(!memory)
+            memory = vk::MemoryBarrier2KHR{};
+        memory->srcStageMask  |= barrier.srcStageMask;
+        memory->srcAccessMask |= barrier.srcAccessMask;
+        memory->dstStageMask  |= barrier.dstStageMask;
+        memory->dstAccessMask |= barrier.dstAccessMask;
+        return true;
+    };
+
+    for(auto pass : group->passes)
+    {
+        for(auto it = pass->pre_buffer_barriers.begin(), jt = it;
+            it != pass->pre_buffer_barriers.end(); it = jt)
+        {
+            ++jt;
+            if(process(it->second, pass->pre_memory_barrier))
+                pass->pre_buffer_barriers.erase(it);
+        }
+
+        for(auto it = pass->pre_ext_buffer_barriers.begin(), jt = it;
+            it != pass->pre_ext_buffer_barriers.end(); it = jt)
+        {
+            ++jt;
+            if(process(*it, pass->pre_memory_barrier))
+                pass->pre_ext_buffer_barriers.erase(it);
+        }
+
+        for(auto it = pass->post_ext_buffer_barriers.begin(), jt = it;
+            it != pass->post_ext_buffer_barriers.end(); it = jt)
+        {
+            ++jt;
+            if(process(*it, pass->post_memory_barrier))
+                pass->post_ext_buffer_barriers.erase(it);
+        }
     }
 }
 

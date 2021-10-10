@@ -212,7 +212,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                         .stages     = vk::PipelineStageFlagBits2KHR::eNone,
                         .access     = vk::AccessFlagBits2KHR::eNone
                     });
-                    dummy_pass->generated_buffer_usages_[rsc] =
+                    dummy_pass->generated_buffer_usages[rsc] =
                         record.usages.back();
 
                     buffer_final_states_[rsc] = UsingState{
@@ -230,7 +230,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                         .layout      = signal.layout,
                         .exit_layout = signal.layout
                     });
-                    dummy_pass->generated_image_usages_[rsc] =
+                    dummy_pass->generated_image_usages[rsc] =
                         record.usages.back();
 
                     image_final_states_[rsc] = UsingState{
@@ -362,7 +362,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                     .stages     = vk::PipelineStageFlagBits2KHR::eNone,
                     .access     = vk::AccessFlagBits2KHR::eNone
                 });
-                necessary_pass->generated_buffer_usages_[rsc] =
+                necessary_pass->generated_buffer_usages[rsc] =
                     record.usages.back();
 
                 buffer_final_states_[rsc] = UsingState{
@@ -380,7 +380,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                     .layout      = signal.layout,
                     .exit_layout = signal.layout
                 });
-                necessary_pass->generated_image_usages_[rsc] =
+                necessary_pass->generated_image_usages[rsc] =
                     record.usages.back();
 
                 image_final_states_[rsc] = UsingState{
@@ -472,7 +472,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                     .stages     = vk::PipelineStageFlagBits2KHR::eNone,
                     .access     = vk::AccessFlagBits2KHR::eNone
                 });
-                dummy_pass->generated_buffer_usages_[rsc] =
+                dummy_pass->generated_buffer_usages[rsc] =
                     record.usages.back();
 
                 buffer_final_states_[rsc] = UsingState{
@@ -490,7 +490,7 @@ void SemaphoreSignalHandler::processSignalingSemaphore(
                     .layout      = signal.layout,
                     .exit_layout = signal.layout
                 });
-                dummy_pass->generated_image_usages_[rsc] =
+                dummy_pass->generated_image_usages[rsc] =
                     record.usages.back();
 
                 image_final_states_[rsc] = UsingState{

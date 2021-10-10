@@ -10,13 +10,13 @@ struct ExecutablePass
 
     PassBase *pass;
 
-    Vector<vk::MemoryBarrier2KHR>       pre_memory_barriers;
-    Vector<vk::BufferMemoryBarrier2KHR> pre_buffer_barriers;
-    Vector<vk::ImageMemoryBarrier2KHR>  pre_image_barriers;
+    std::optional<vk::MemoryBarrier2KHR> pre_memory_barrier;
+    Vector<vk::BufferMemoryBarrier2KHR>  pre_buffer_barriers;
+    Vector<vk::ImageMemoryBarrier2KHR>   pre_image_barriers;
 
-    Vector<vk::MemoryBarrier2KHR>       post_memory_barriers;
-    Vector<vk::BufferMemoryBarrier2KHR> post_buffer_barriers;
-    Vector<vk::ImageMemoryBarrier2KHR>  post_image_barriers;
+    std::optional<vk::MemoryBarrier2KHR> post_memory_barrier;
+    Vector<vk::BufferMemoryBarrier2KHR>  post_buffer_barriers;
+    Vector<vk::ImageMemoryBarrier2KHR>   post_image_barriers;
 };
 
 struct ExecutableGroup

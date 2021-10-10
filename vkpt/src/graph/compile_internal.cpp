@@ -20,8 +20,8 @@ CompilePass::CompilePass(std::pmr::memory_resource &memory)
       pre_image_barriers(&memory),
       wait_semaphores(&memory),
       signal_semaphores(&memory),
-      generated_buffer_usages_(&memory),
-      generated_image_usages_(&memory)
+      generated_buffer_usages(&memory),
+      generated_image_usages(&memory)
 {
     
 }

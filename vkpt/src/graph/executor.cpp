@@ -3,10 +3,8 @@
 VKPT_GRAPH_BEGIN
 
 ExecutablePass::ExecutablePass(std::pmr::memory_resource &memory)
-    : pre_memory_barriers(&memory),
-      pre_buffer_barriers(&memory),
+    : pre_buffer_barriers(&memory),
       pre_image_barriers(&memory),
-      post_memory_barriers(&memory),
       post_buffer_barriers(&memory),
       post_image_barriers(&memory)
 {
@@ -59,12 +57,19 @@ void Executor::record(
 
         for(auto &pass : group.passes)
         {
-            if(!pass.pre_memory_barriers.empty() ||
-               !pass.pre_buffer_barriers.empty() ||
-               !pass.pre_image_barriers.empty())
+            if(pass.pre_memory_barrier ||
+              !pass.pre_buffer_barriers.empty() ||
+              !pass.pre_image_barriers.empty())
             {
+                vk::ArrayProxy<const vk::MemoryBarrier2KHR> memory_barrier;
+                if(pass.pre_memory_barrier)
+                {
+                    memory_barrier = vk::ArrayProxy<const vk::MemoryBarrier2KHR>
+                        { *pass.pre_memory_barrier };
+                }
+
                 context.getCommandBuffer().pipelineBarrier(
-                    pass.pre_memory_barriers,
+                    memory_barrier,
                     pass.pre_buffer_barriers,
                     pass.pre_image_barriers);
             }
@@ -72,12 +77,19 @@ void Executor::record(
             if(pass.pass)
                 pass.pass->onPassRender(context);
             
-            if(!pass.post_memory_barriers.empty() ||
-               !pass.post_buffer_barriers.empty() ||
-               !pass.post_image_barriers.empty())
+            if(pass.post_memory_barrier ||
+              !pass.post_buffer_barriers.empty() ||
+              !pass.post_image_barriers.empty())
             {
+                vk::ArrayProxy<const vk::MemoryBarrier2KHR> memory_barrier;
+                if(pass.pre_memory_barrier)
+                {
+                    memory_barrier = vk::ArrayProxy<const vk::MemoryBarrier2KHR>
+                    { *pass.pre_memory_barrier };
+                }
+
                 context.getCommandBuffer().pipelineBarrier(
-                    pass.post_memory_barriers,
+                    memory_barrier,
                     pass.post_buffer_barriers,
                     pass.post_image_barriers);
             }

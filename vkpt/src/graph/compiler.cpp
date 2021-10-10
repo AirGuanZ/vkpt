@@ -350,7 +350,7 @@ void Compiler::processUnwaitedFirstUsage(const Rsc &resource)
                     .stages = s.stages,
                     .access = s.access
                 });
-                dummy_pass->generated_buffer_usages_[resource] =
+                dummy_pass->generated_buffer_usages[resource] =
                     record.usages.front();
             }
             else
@@ -362,7 +362,7 @@ void Compiler::processUnwaitedFirstUsage(const Rsc &resource)
                     .layout      = s.layout,
                     .exit_layout = s.layout
                 });
-                dummy_pass->generated_image_usages_[resource] =
+                dummy_pass->generated_image_usages[resource] =
                     record.usages.front();
             }
         }
@@ -715,7 +715,12 @@ void Compiler::fillExecutableGroup(
             pass->post_ext_image_barriers.begin(),
             pass->post_ext_image_barriers.end(),
             std::back_inserter(output_pass.post_image_barriers));
-        
+
+        if(pass->pre_memory_barrier)
+            output_pass.pre_memory_barrier = *pass->pre_memory_barrier;
+        if(pass->post_memory_barrier)
+            output_pass.post_memory_barrier = *pass->post_memory_barrier;
+
         for(auto &[_, submit] : pass->wait_semaphores)
             output.wait_semaphores.push_back(submit);
 

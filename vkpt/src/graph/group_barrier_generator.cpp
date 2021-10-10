@@ -19,10 +19,10 @@ void GroupBarrierGenerator::fillBarriers(CompileGroup *group)
         auto pass = group->passes[pass_i];
         assert(pass->sorted_index_in_group == static_cast<int>(pass_i));
 
-        for(auto &[buffer, usage] : pass->generated_buffer_usages_)
+        for(auto &[buffer, usage] : pass->generated_buffer_usages)
             handleResource(pass, buffer, usage);
 
-        for(auto &[image_subrsc, usage] : pass->generated_image_usages_)
+        for(auto &[image_subrsc, usage] : pass->generated_image_usages)
             handleResource(pass, image_subrsc, usage);
 
         if(!pass->raw_pass)

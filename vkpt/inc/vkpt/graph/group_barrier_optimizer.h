@@ -25,6 +25,8 @@ private:
     void movePostExtBarriers(CompileGroup *group);
 
     void mergePreAndPostBarriers(CompileGroup *group);
+
+    void convertBufferBarrierToGlobalMemoryBarrier(CompileGroup *group);
 };
 
 VKPT_GRAPH_END
